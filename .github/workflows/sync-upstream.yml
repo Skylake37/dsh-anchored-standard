@@ -1,0 +1,97 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '17 3 * * *'    # daily 03:17 UTC, off the :00 mark
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/xiaobright/dsh-anchored-standard.git
+          git remote set-url --push upstream DO-NOT-PUSH
+          git fetch upstream main
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fast-forward main to upstream
+        id: sync-main
+        run: |
+          git switch main
+          git pull --ff-only origin main
+          git merge --ff-only upstream/main
+          git push origin main
+
+      - name: Merge main into agent-dev
+        id: sync-agent-dev
+        run: |
+          git fetch origin agent-dev
+          git switch agent-dev
+          git pull --ff-only origin agent-dev
+          git merge main --no-edit
+          git push origin agent-dev
+
+      - name: Open or update conflict issue
+        if: failure() && (steps.sync-main.outcome == 'failure' || steps.sync-agent-dev.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAIN_FAILED: ${{ steps.sync-main.outcome == 'failure' }}
+          DEV_FAILED: ${{ steps.sync-agent-dev.outcome == 'failure' }}
+        run: |
+          gh label create conflict --repo "$GITHUB_REPOSITORY" --force >/dev/null 2>&1 || true
+          title="Upstream sync conflict"
+          body="Automated upstream sync failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Failed step(s):
+          - fast-forward main to upstream: $MAIN_FAILED
+          - merge main into agent-dev: $DEV_FAILED
+
+          Resolve locally:
+
+          \`\`\`sh
+          git fetch upstream
+          git switch main
+          git merge --ff-only upstream/main
+          git push origin main
+          git switch agent-dev
+          git merge main
+          # fix conflicts, commit, push
+          git push origin agent-dev
+          \`\`\`
+
+          If main was pushed to directly, restore the pure mirror first:
+
+          \`\`\`sh
+          git switch main
+          git reset --hard upstream/main
+          git push --force-with-lease origin main
+          \`\`\`
+
+          Close this issue after both branches are green again."
+
+          open_count=$(gh issue list --repo "$GITHUB_REPOSITORY" --label conflict --state open --limit 1 --json number --jq 'length')
+          if [ "$open_count" -gt 0 ]; then
+            number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label conflict --state open --limit 1 --json number --jq '.[0].number')
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label conflict --body "$body"
+          fi
