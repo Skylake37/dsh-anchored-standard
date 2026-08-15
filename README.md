@@ -266,6 +266,49 @@ Restart DeepSeek Harness, create a blank session, select **Whoami Standard
 runs first, and your message is answered with the full tooling on the next
 turn.
 
+## Full-Powered Subagents (whoami-standard)
+
+Subagents spawned from a `whoami-standard` session can inherit the same anchor
+flow as top-level sessions. This is the **full-powered subagent** mode: the
+subagent gets the same first-turn trajectory control, the whoami anchor, and
+the promoted resident catalog before it works on the delegated task.
+
+### How to enable
+
+In `whoami-standard/agent.cordis.yml`, set `includeSubagents: true` on both
+the `zero-tool-bootstrap` and `whoami-turn` rows:
+
+```yaml
+- id: zero-tool-bootstrap
+  name: ./zero-tool-bootstrap.mjs
+  config:
+    suppressedContextSources: [agent-instructions, skill-catalog]
+    compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
+    includeSubagents: true
+
+- id: whoami-turn
+  name: ./whoami-turn.mjs
+  config:
+    text: 你是谁
+    includeSubagents: true
+```
+
+### What changes
+
+1. A newly spawned subagent's first model request sees only the fixed "你是谁"
+   anchor with an empty tool catalog.
+2. The subagent's self-introduction reply is the promotion signal.
+3. The real delegated prompt is processed on the next turn with the promoted
+   resident catalog (shells, `str_replace_editor`, and discovery tools).
+
+### Notes
+
+- Default is `includeSubagents: false`, so existing behavior (subagents start
+  with tools) is preserved unless you opt in.
+- Each subagent costs one extra model call for the self-introduction turn.
+- `zero-anchored-standard` is not affected by this option unless you also
+  enable it there and update its `anchor-turn` plugin accordingly.
+
 ## Official ecosystem guidance
 
 DeepSeek currently asks community plugin authors to publish plugins in their own

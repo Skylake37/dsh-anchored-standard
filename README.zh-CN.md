@@ -215,6 +215,47 @@ cp -R whoami-standard "$dsh_home/.agent-presets/whoami-standard"
 重启 DeepSeek Harness，新建空白会话，选择 **Whoami Standard (experimental)**，
 然后发送第一条消息——自我介绍轮先跑，你的消息在下一轮带着完整工具被回答。
 
+## 满血 Subagent（whoami-standard 继承锚定流程）
+
+从 `whoami-standard` 会话派生的子代理，可以继承与顶层会话相同的锚定流程，
+这就是“满血 subagent”模式：子代理同样享受首轮轨迹控制，先做“你是谁”
+自我介绍，再在晋升后的 resident 目录下执行真正的委托任务。
+
+### 开启方法
+
+在 `whoami-standard/agent.cordis.yml` 中，给 `zero-tool-bootstrap` 和
+`whoami-turn` 两行都设置 `includeSubagents: true`：
+
+```yaml
+- id: zero-tool-bootstrap
+  name: ./zero-tool-bootstrap.mjs
+  config:
+    suppressedContextSources: [agent-instructions, skill-catalog]
+    compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
+    includeSubagents: true
+
+- id: whoami-turn
+  name: ./whoami-turn.mjs
+  config:
+    text: 你是谁
+    includeSubagents: true
+```
+
+### 行为变化
+
+1. 子代理的第一个模型请求只看到固定的“你是谁”锚定消息，工具列表为空。
+2. 子代理的自我介绍回复作为晋升信号。
+3. 真正的委托任务在下一轮执行，此时 resident 工具目录（shell、
+   str_replace_editor、发现类工具）已解锁。
+
+### 说明
+
+- 默认仍是 `includeSubagents: false`，不开启时子代理首轮即可使用工具，
+  保持原行为。
+- 每个子代理会多消耗一次模型调用（自我介绍轮）。
+- `zero-anchored-standard` 默认不受影响；如果要在该 preset 下也启用，
+  需要同步修改它的 `anchor-turn` 插件。
+
 ## 官方生态要求
 
 DeepSeek 当前建议社区作者把插件放在自己的 GitHub 项目中，并为仓库添加
