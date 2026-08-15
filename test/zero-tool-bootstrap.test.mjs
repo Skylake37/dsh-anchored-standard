@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name } from '../zero-anchored-standard/zero-tool-bootstrap.mjs'
+import { apply, name } from '../shared/zero-tool-bootstrap.mjs'
 
 function register(config) {
   const listeners = {}
@@ -184,4 +184,23 @@ test('the pre-step strip registers with prepend', () => {
 test('invalid compactionTools values fail at apply time', () => {
   assert.throws(() => register({ compactionTools: [] }), /compactionTools/)
   assert.throws(() => register({ compactionTools: ['read', 42] }), /compactionTools/)
+})
+
+test('includeSubagents: true keeps subagents in the zero-tool anchor phase', async () => {
+  const { listeners } = register({ includeSubagents: true })
+  const tools = [{ name: 'bash' }, { name: 'read' }, { name: 'edit' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools, { delegationDepth: 1 })
+  assert.deepEqual(result.tools, [])
+})
+
+test('includeSubagents: true lets a subagent promote to the resident catalog after the anchor reply', async () => {
+  const { listeners } = register({ includeSubagents: true })
+  const tools = [{ name: 'bash' }, { name: 'read' }, { name: 'edit' }, { name: 'grep' }]
+  const result = await assemble(
+    listeners['system-prompt/assemble'],
+    [{ type: 'assistant/message', data: {} }],
+    tools,
+    { delegationDepth: 1 },
+  )
+  assert.deepEqual(result.tools.map((tool) => tool.name), ['bash'])
 })

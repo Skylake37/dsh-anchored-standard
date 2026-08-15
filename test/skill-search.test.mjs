@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name } from '../preset/skill-search.mjs'
+import { apply, name } from '../shared/skill-search.mjs'
 
 function register(skills = []) {
   const registered = []

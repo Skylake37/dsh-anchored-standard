@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name, inject } from '../preset/custom-bash.mjs'
+import { apply, name, inject } from '../shared/custom-bash.mjs'
 
 function register(config) {
   const registered = []
