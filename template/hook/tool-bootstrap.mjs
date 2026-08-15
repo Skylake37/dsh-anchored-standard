@@ -3,27 +3,29 @@
  * register it as the FIRST row of the preset's agent.cordis.yml.
  *
  * Behavior per session:
- *  - Request #1 sees a pinned bootstrap tool surface, a capped output budget,
- *    and no auto-injected workspace/skill context.
+ *  - Request #1 sees the pinned bootstrap tool surface (default upstream
+ *    finding: the official Minimal preset's real pair — persistent `bash` +
+ *    `str_replace_editor`) and no auto-injected workspace/skill context.
  *  - After the session records its first durable promotion signal (default:
  *    the first `tool/call` OR the first `assistant/message`, whichever comes
- *    first), every later request sees the preset's own full catalog, the
- *    normal output budget, and context injections again.
+ *    first), every later request sees the preset's own full catalog and the
+ *    normal context injections again.
  *  - The phase is derived from durable session events, so resume and reload
  *    preserve it; promotion decisions are memoized per session id per process.
  *
  * Config (all values come from the row that mounts this file):
- *  - `bootstrapTools: string[]` — exact first-request tool list. Use this for
- *    arbitrary presets (e.g. Minimal: `[persistent-bash]`).
- *  - `shellTools` + `commonTools` — legacy mode: exactly one available shell
- *    plus every common tool. The two modes are mutually exclusive.
+ *  - `bootstrapTools: string[]` — required exact first-request tool list.
  *  - `promoteOn: either | tool-call | assistant-message` (default `either`).
- *  - `bootstrapMaxTokens: positive int` (default 1024).
+ *  - `bootstrapMaxTokens: positive int` — OPT-IN first-request output cap.
+ *    Omit it to let the adapter default flow: the Minimal tool schema anchors
+ *    at the adapter-default maxTokens without a cap (upstream issue #11).
+ *    When set, the cap is registered with `prepend` and stripped after
+ *    promotion.
  *  - `suppressedContextSources: string[]` (default `skill-catalog`,
  *    `agent-instructions`) — first-step message kinds removed while
  *    bootstrapping. An explicitly empty array disables the context filter
- *    while keeping the tool bootstrap and the output cap. Config name follows
- *    upstream `preset/tool-bootstrap.mjs`.
+ *    while keeping the tool bootstrap. Config name follows upstream
+ *    `preset/tool-bootstrap.mjs`.
  *  - `delegationDepthExempt: boolean` (default true) — subagents always see
  *    the full catalog; set false to bootstrap child sessions too.
  *
@@ -32,9 +34,9 @@
  *    dsh-agent-instructions and dsh-tool-skill, its `agent/pre-step` strip is
  *    the final waterfall transform and actually removes what those plugins
  *    inject. An inject list here would let them re-inject after the strip.
- *  - The pre-step listener additionally registers with `prepend: true` (same
- *    as upstream), so the strip stays the outermost transform even against
- *    host-plane listeners and future row reordering.
+ *  - Both listeners register with `prepend: true` (upstream PRs #10/#13), so
+ *    the strip and the optional budget cap stay the outermost transforms even
+ *    against host-plane listeners and future row reordering.
  *
  * Robustness:
  *  - A bootstrap tool missing from the assembled catalog degrades to the full
@@ -51,7 +53,6 @@ export const name = 'anchored-tool-bootstrap'
 /** Deliberately NO inject list — see the ordering contract above. */
 export const inject = []
 
-const DEFAULT_BOOTSTRAP_MAX_TOKENS = 1024
 const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions']
 
 /** Durable session event types that count as a promotion signal per mode. */
@@ -75,7 +76,7 @@ function parsePromoteOn(value) {
 }
 
 /**
- * Validate the suppressed context sources. Unlike the bootstrap tool lists,
+ * Validate the suppressed context sources. Unlike the bootstrap tool list,
  * an explicitly empty array is meaningful: it disables the context filter
  * while keeping the tool bootstrap.
  */
@@ -87,8 +88,13 @@ function sourceList(value, field, fallback) {
   return new Set(value)
 }
 
-function positiveInt(value, field, fallback) {
-  if (value === undefined) return fallback
+/**
+ * Validate the optional first-request output cap. `undefined` means NO cap:
+ * the Minimal tool schema anchors at the adapter-default maxTokens (upstream
+ * issue #11), so the cap is opt-in rather than the default.
+ */
+function optionalPositiveInt(value, field) {
+  if (value === undefined) return undefined
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new TypeError(`${name}: ${field} must be a positive safe integer`)
   }
@@ -103,34 +109,11 @@ function optionalBool(value, field, fallback) {
   return value
 }
 
-/** Which filter mode this mount uses, validated once at apply time. */
-function parseBootstrapFilter(config) {
-  const hasExact = config.bootstrapTools !== undefined
-  const hasLegacy = config.shellTools !== undefined || config.commonTools !== undefined
-  if (hasExact && hasLegacy) {
-    throw new TypeError(`${name}: use either bootstrapTools or shellTools+commonTools, not both`)
-  }
-  if (hasExact) {
-    return { kind: 'exact', tools: stringList(config.bootstrapTools, 'bootstrapTools') }
-  }
-  if (config.shellTools !== undefined && config.commonTools !== undefined) {
-    return {
-      kind: 'legacy',
-      shellTools: stringList(config.shellTools, 'shellTools'),
-      commonTools: stringList(config.commonTools, 'commonTools'),
-    }
-  }
-  if (hasLegacy) {
-    throw new TypeError(`${name}: shellTools and commonTools must be provided together`)
-  }
-  throw new TypeError(`${name}: bootstrapTools (or shellTools+commonTools) is required`)
-}
-
 /** Register the per-session bootstrap filters. */
 export function apply(ctx, config) {
-  const filter = parseBootstrapFilter(config)
+  const bootstrapTools = stringList(config.bootstrapTools, 'bootstrapTools')
   const promoteEvents = parsePromoteOn(config.promoteOn)
-  const bootstrapMaxTokens = positiveInt(config.bootstrapMaxTokens, 'bootstrapMaxTokens', DEFAULT_BOOTSTRAP_MAX_TOKENS)
+  const bootstrapMaxTokens = optionalPositiveInt(config.bootstrapMaxTokens, 'bootstrapMaxTokens')
   const suppressedSources = sourceList(config.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
   const delegationDepthExempt = optionalBool(config.delegationDepthExempt, 'delegationDepthExempt', true)
 
@@ -162,39 +145,20 @@ export function apply(ctx, config) {
     return hit
   }
 
-  /** Narrow the assembled catalog to the pinned bootstrap surface. */
+  /** Narrow the assembled catalog to the pinned bootstrap tool set. */
   const applyBootstrap = (assembled) => {
-    if (filter.kind === 'exact') {
-      const available = new Set(assembled.tools.map((tool) => tool.name))
-      const missing = filter.tools.filter((toolName) => !available.has(toolName))
-      if (missing.length > 0) {
-        warnOnce(
-          `${name}: bootstrap tools missing from the assembled catalog; `
-          + `missing=${JSON.stringify(missing)} — bootstrap disabled, full catalog exposed`,
-        )
-        return assembled
-      }
-      const bootstrap = new Set(filter.tools)
-      return {
-        ...assembled,
-        tools: assembled.tools.filter((tool) => bootstrap.has(tool.name)),
-      }
-    }
     const available = new Set(assembled.tools.map((tool) => tool.name))
-    const selectedShells = filter.shellTools.filter((toolName) => available.has(toolName))
-    const missingCommon = filter.commonTools.filter((toolName) => !available.has(toolName))
-    if (selectedShells.length !== 1 || missingCommon.length > 0) {
+    const missing = bootstrapTools.filter((toolName) => !available.has(toolName))
+    if (missing.length > 0) {
       warnOnce(
-        `${name}: expected exactly one bootstrap shell and every common tool; `
-        + `shells=${JSON.stringify(selectedShells)}, missing=${JSON.stringify(missingCommon)} — `
+        `${name}: expected every bootstrap tool; missing=${JSON.stringify(missing)} — `
         + 'bootstrap disabled, full catalog exposed',
       )
       return assembled
     }
-    const bootstrap = new Set([...selectedShells, ...filter.commonTools])
     return {
       ...assembled,
-      tools: assembled.tools.filter((tool) => bootstrap.has(tool.name)),
+      tools: assembled.tools.filter((tool) => bootstrapTools.includes(tool.name)),
     }
   }
 
@@ -211,31 +175,35 @@ export function apply(ctx, config) {
     }
   })
 
-  // Cap the first model request's output budget while bootstrapping.
-  // prepend: true keeps this listener the OUTERMOST transform of the
-  // agent/request waterfall (upstream parity, see PR #13), so a later
-  // listener can never override the first-round budget after we set it.
-  ctx.on('agent/request', async (payload, next) => {
-    const resolved = await next()
-    const agent = payload.agent
-    if (isPromoted(agent)) {
-      // The next request's seed proposal carries the previous header's
-      // maxTokens forward, so the injected cap must be stripped explicitly —
-      // otherwise it would persist for the whole session.
-      if (resolved.maxTokens === bootstrapMaxTokens) {
-        const { maxTokens: _bootstrap, ...rest } = resolved
-        return rest
+  // Optionally cap the first model request's output budget while bootstrapping.
+  // Omitted (`undefined`) means the adapter default flows — the Minimal tool
+  // schema anchors at 256000 without a cap (upstream issue #11).
+  if (bootstrapMaxTokens !== undefined) {
+    // prepend: true keeps this listener the OUTERMOST transform of the
+    // agent/request waterfall (upstream PR #13), so a later listener can
+    // never override the first-round budget after we set it.
+    ctx.on('agent/request', async (payload, next) => {
+      const resolved = await next()
+      const agent = payload.agent
+      if (isPromoted(agent)) {
+        // The next request's seed proposal carries the previous header's
+        // maxTokens forward, so the injected cap must be stripped explicitly —
+        // otherwise it would persist for the whole session.
+        if (resolved.maxTokens === bootstrapMaxTokens) {
+          const { maxTokens: _bootstrap, ...rest } = resolved
+          return rest
+        }
+        return resolved
       }
-      return resolved
-    }
-    return {
-      ...resolved,
-      maxTokens: bootstrapMaxTokens,
-    }
-  }, { prepend: true })
+      return {
+        ...resolved,
+        maxTokens: bootstrapMaxTokens,
+      }
+    }, { prepend: true })
+  }
 
   // Strip auto-injected first-step context during bootstrap. Registered first
-  // (ordering contract) and prepended (same as upstream), this strip is the
+  // (ordering contract) and prepended (upstream parity), this strip is the
   // final waterfall transform and removes what later listeners inject.
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     // Downstream errors propagate untouched; only this filter's own logic is guarded.

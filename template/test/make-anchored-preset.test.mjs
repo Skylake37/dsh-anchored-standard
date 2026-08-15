@@ -7,14 +7,16 @@ import test from 'node:test'
 import {
   buildBootstrapRow,
   DEFAULTS_SOURCE,
-  detectBootstrapFilter,
+  detectBootstrapTools,
   generateAnchoredPreset,
   hasRow,
   insertBootstrapRow,
   loadTemplateDefaults,
+  MINIMAL_BOOTSTRAP_TOOLS,
   parseArgs,
   patchPresetMeta,
   readMetaField,
+  stampMinimalToolRows,
 } from '../../tools/make-anchored-preset.mjs'
 
 const STANDARD_COMPOSITION = `# leading comment block
@@ -24,6 +26,7 @@ const STANDARD_COMPOSITION = `# leading comment block
 
 - id: tool-bash
   name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
 
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
@@ -42,6 +45,10 @@ const MINIMAL_COMPOSITION = `- id: pty
   name: '@deepseek-ai/dsh-tool-str-replace-editor'
 `
 
+const ARBITRARY_COMPOSITION = `- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+`
+
 const META = `name: 标准模式
 description: 功能完整。
 order: 1
@@ -57,40 +64,55 @@ async function fixturePreset(parent, id, composition = STANDARD_COMPOSITION) {
 
 const TEMPLATE_DEFAULTS = {
   promoteOn: 'either',
-  bootstrapMaxTokens: 1024,
   delegationDepthExempt: true,
-  suppressedContextSources: ['skill-catalog', 'agent-instructions'],
+  suppressedContextSources: ['agent-instructions', 'skill-catalog'],
 }
 
-test('detectBootstrapFilter finds the shell+read arrangement only when all parts exist', () => {
-  assert.deepEqual(detectBootstrapFilter(STANDARD_COMPOSITION), {
-    kind: 'legacy',
-    shellTools: ['bash', 'pwsh'],
-    commonTools: ['read'],
-  })
-  assert.equal(detectBootstrapFilter(MINIMAL_COMPOSITION), undefined)
+test('detectBootstrapTools pins the PR14 Minimal pair for both supported families', () => {
+  assert.deepEqual(detectBootstrapTools(STANDARD_COMPOSITION), MINIMAL_BOOTSTRAP_TOOLS)
+  assert.deepEqual(detectBootstrapTools(MINIMAL_COMPOSITION), MINIMAL_BOOTSTRAP_TOOLS)
+  assert.equal(detectBootstrapTools(ARBITRARY_COMPOSITION), undefined)
   // The persistent-bash package name must not satisfy the plain bash matcher.
-  assert.equal(hasRow(STANDARD_COMPOSITION.replace('@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-bash-persistent'), 'tool-bash'), true)
-  assert.equal(detectBootstrapFilter(`- id: x
+  assert.deepEqual(
+    detectBootstrapTools(`- id: x
   name: '@deepseek-ai/dsh-tool-bash-persistent'
-
-- id: y
-  name: '@deepseek-ai/dsh-tool-str-replace-editor'
-`), undefined)
+`),
+    MINIMAL_BOOTSTRAP_TOOLS,
+  )
 })
 
-test('buildBootstrapRow renders exact and legacy filters', () => {
-  const exact = buildBootstrapRow({ kind: 'exact', tools: ['persistent-bash'] }, TEMPLATE_DEFAULTS)
-  assert.match(exact, /bootstrapTools: \["persistent-bash"\]/)
-  assert.match(exact, /promoteOn: either/)
-  assert.match(exact, /suppressedContextSources: \["skill-catalog", "agent-instructions"\]/)
-  const legacy = buildBootstrapRow({ kind: 'legacy', shellTools: ['bash', 'pwsh'], commonTools: ['read'] }, TEMPLATE_DEFAULTS)
-  assert.match(legacy, /shellTools: \["bash", "pwsh"\]/)
-  assert.match(legacy, /commonTools: \["read"\]/)
+test('stampMinimalToolRows adds both Minimal groups and disables standard tool-bash', () => {
+  const stamped = stampMinimalToolRows(STANDARD_COMPOSITION, MINIMAL_BOOTSTRAP_TOOLS)
+  assert.deepEqual(stamped.appended, ['persistent-shell', 'bootstrap-filesystem'])
+  assert.equal(stamped.toolBashDisabled, true)
+  assert.match(stamped.composition, /- id: persistent-shell/)
+  assert.match(stamped.composition, /@deepseek-ai\/dsh-tool-bash-persistent/)
+  assert.match(stamped.composition, /- id: bootstrap-filesystem/)
+  assert.match(stamped.composition, /@deepseek-ai\/dsh-tool-str-replace-editor/)
+  const toolBashBlock = stamped.composition.split('- id: tool-pwsh')[0]
+  assert.match(toolBashBlock, /- id: tool-bash\s*\n\s*disabled: true/)
+})
+
+test('stampMinimalToolRows is a no-op for a composition already mounting the pair', () => {
+  const stamped = stampMinimalToolRows(MINIMAL_COMPOSITION, MINIMAL_BOOTSTRAP_TOOLS)
+  assert.deepEqual(stamped.appended, [])
+  assert.equal(stamped.toolBashDisabled, false)
+  assert.doesNotMatch(stamped.composition, /- id: persistent-shell/)
+  assert.doesNotMatch(stamped.composition, /- id: bootstrap-filesystem/)
+})
+
+test('buildBootstrapRow pins tools and omits the cap unless asked', () => {
+  const uncapped = buildBootstrapRow(MINIMAL_BOOTSTRAP_TOOLS, TEMPLATE_DEFAULTS)
+  assert.match(uncapped, /bootstrapTools: \["bash", "str_replace_editor"\]/)
+  assert.match(uncapped, /promoteOn: either/)
+  assert.match(uncapped, /suppressedContextSources: \["agent-instructions", "skill-catalog"\]/)
+  assert.doesNotMatch(uncapped, /bootstrapMaxTokens/)
+  const capped = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapMaxTokens: 1024 })
+  assert.match(capped, /bootstrapMaxTokens: 1024/)
 })
 
 test('insertBootstrapRow puts the hook row before every other entry and keeps leading comments', () => {
-  const row = buildBootstrapRow({ kind: 'exact', tools: ['pwsh', 'read'] }, TEMPLATE_DEFAULTS)
+  const row = buildBootstrapRow(MINIMAL_BOOTSTRAP_TOOLS, TEMPLATE_DEFAULTS)
   const patched = insertBootstrapRow(STANDARD_COMPOSITION, row)
   const lines = patched.split('\n')
   assert.equal(lines[0], '# leading comment block')
@@ -112,16 +134,16 @@ test('patchPresetMeta replaces known fields in place and appends missing ones', 
   assert.equal(readMetaField(patched, 'name'), '标准模式 Anchored (experimental)')
 })
 
-test('loadTemplateDefaults reads the shipped template/defaults.json', async () => {
+test('loadTemplateDefaults reads the PR14 defaults and carries no maxTokens default', async () => {
   const defaults = await loadTemplateDefaults()
   assert.equal(defaults.promoteOn, 'either')
-  assert.equal(defaults.bootstrapMaxTokens, 1024)
   assert.equal(defaults.delegationDepthExempt, true)
-  assert.deepEqual(defaults.suppressedContextSources, ['skill-catalog', 'agent-instructions'])
+  assert.deepEqual(defaults.suppressedContextSources, ['agent-instructions', 'skill-catalog'])
+  assert.equal('bootstrapMaxTokens' in defaults, false)
   assert.equal(DEFAULTS_SOURCE.href.includes('/template/defaults.json'), true)
 })
 
-test('generateAnchoredPreset stamps a working anchored copy end to end', async (t) => {
+test('generateAnchoredPreset stamps a working anchored copy of a standard preset', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const sourceDir = await fixturePreset(root, 'standard')
@@ -135,39 +157,61 @@ test('generateAnchoredPreset stamps a working anchored copy end to end', async (
 
   assert.equal(result.written, true)
   assert.equal(result.plan.id, 'standard-anchored')
-  assert.equal(result.plan.filter.kind, 'legacy')
+  assert.deepEqual(result.plan.bootstrapTools, MINIMAL_BOOTSTRAP_TOOLS)
+  assert.deepEqual(result.plan.appendedToolGroups, ['persistent-shell', 'bootstrap-filesystem'])
+  assert.equal(result.plan.toolBashDisabled, true)
   const target = join(root, 'out', 'standard-anchored')
   const composition = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
   assert.ok(hasRow(composition, 'tool-bootstrap'))
   assert.ok(composition.indexOf('- id: tool-bootstrap') < composition.indexOf('- id: persona'))
   assert.match(composition, /name: \.\/tool-bootstrap\.mjs/)
-  assert.match(composition, /suppressedContextSources: \["skill-catalog", "agent-instructions"\]/)
+  assert.match(composition, /bootstrapTools: \["bash", "str_replace_editor"\]/)
+  assert.doesNotMatch(composition, /bootstrapMaxTokens/)
+  assert.match(composition, /- id: persistent-shell/)
+  assert.match(composition, /- id: bootstrap-filesystem/)
   const hook = await readFile(join(target, 'tool-bootstrap.mjs'), 'utf8')
   assert.match(hook, /export const name = 'anchored-tool-bootstrap'/)
   const meta = await readFile(join(target, 'preset.yml'), 'utf8')
   assert.match(meta, /标准模式 Anchored \(experimental\)/)
 })
 
-test('generateAnchoredPreset refuses sources without a detectable surface and refuses double stamping', async (t) => {
+test('generateAnchoredPreset auto-succeeds on a Minimal-family preset without adding groups', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const minimalDir = await fixturePreset(root, 'minimal', MINIMAL_COMPOSITION)
-  await assert.rejects(
-    generateAnchoredPreset({ from: minimalDir, root: join(root, 'out'), defaults: TEMPLATE_DEFAULTS }),
-    /--bootstrap-tools/,
-  )
-  const explicit = await generateAnchoredPreset({
+  const result = await generateAnchoredPreset({
     from: minimalDir,
     to: 'minimal-anchored',
     root: join(root, 'out'),
-    bootstrapTools: 'persistent-bash',
     defaults: TEMPLATE_DEFAULTS,
   })
-  assert.equal(explicit.plan.filter.kind, 'exact')
-  assert.deepEqual(explicit.plan.filter.tools, ['persistent-bash'])
+  assert.deepEqual(result.plan.bootstrapTools, MINIMAL_BOOTSTRAP_TOOLS)
+  assert.deepEqual(result.plan.appendedToolGroups, [])
+  assert.equal(result.plan.toolBashDisabled, false)
+  const composition = await readFile(join(root, 'out', 'minimal-anchored', 'agent.cordis.yml'), 'utf8')
+  assert.doesNotMatch(composition, /- id: persistent-shell/)
+  assert.doesNotMatch(composition, /- id: bootstrap-filesystem/)
+})
+
+test('generateAnchoredPreset fails loud for unknown families and refuses double stamping', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const arbitraryDir = await fixturePreset(root, 'arbitrary', ARBITRARY_COMPOSITION)
+  await assert.rejects(
+    generateAnchoredPreset({ from: arbitraryDir, root: join(root, 'out'), defaults: TEMPLATE_DEFAULTS }),
+    /--bootstrap-tools/,
+  )
+  const explicit = await generateAnchoredPreset({
+    from: arbitraryDir,
+    to: 'arbitrary-anchored',
+    root: join(root, 'out'),
+    bootstrapTools: 'pwsh',
+    defaults: TEMPLATE_DEFAULTS,
+  })
+  assert.deepEqual(explicit.plan.bootstrapTools, ['pwsh'])
   await assert.rejects(
     generateAnchoredPreset({
-      from: join(root, 'out', 'minimal-anchored'),
+      from: join(root, 'out', 'arbitrary-anchored'),
       to: 'twice',
       root: join(root, 'out'),
       defaults: TEMPLATE_DEFAULTS,
@@ -188,9 +232,9 @@ test('generateAnchoredPreset refuses to overwrite and supports dry-run', async (
 })
 
 test('parseArgs maps CLI options and rejects unknown flags', () => {
-  const parsed = parseArgs(['--from', 'standard', '--bootstrap-tools', 'pwsh,read', '--max-tokens', '2048', '--dry-run'])
+  const parsed = parseArgs(['--from', 'standard', '--bootstrap-tools', 'bash,str_replace_editor', '--max-tokens', '2048', '--dry-run'])
   assert.equal(parsed.from, 'standard')
-  assert.equal(parsed.bootstrapTools, 'pwsh,read')
+  assert.equal(parsed.bootstrapTools, 'bash,str_replace_editor')
   assert.equal(parsed.bootstrapMaxTokens, 2048)
   assert.equal(parsed.dryRun, true)
   assert.throws(() => parseArgs(['--nope']), /unknown option/)

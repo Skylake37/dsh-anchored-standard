@@ -4,7 +4,7 @@ import test from 'node:test'
 import { apply, inject, name } from '../hook/tool-bootstrap.mjs'
 
 const EXACT_CONFIG = {
-  bootstrapTools: ['bash', 'read'],
+  bootstrapTools: ['pwsh', 'read'],
 }
 
 function register(config = EXACT_CONFIG) {
@@ -45,7 +45,7 @@ test('exports a diagnostic plugin name and an empty inject list', () => {
   assert.deepEqual(inject, [])
 })
 
-test('exact bootstrapTools pins the first request to exactly that list', async () => {
+test('bootstrapTools pins the first request to exactly that list', async () => {
   const { listeners } = register({ bootstrapTools: ['pwsh', 'read'] })
   const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
   const result = await assemble(listeners['system-prompt/assemble'], [], tools)
@@ -53,26 +53,19 @@ test('exact bootstrapTools pins the first request to exactly that list', async (
   assert.equal(result.system, 'minimal persona')
 })
 
-test('exact bootstrapTools preserves the assembled catalog order', async () => {
+test('bootstrapTools preserves the assembled catalog order', async () => {
   const { listeners } = register({ bootstrapTools: ['edit', 'pwsh'] })
   const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
   const result = await assemble(listeners['system-prompt/assemble'], [], tools)
   assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'edit'])
 })
 
-test('a missing exact bootstrap tool degrades to the full catalog with a warning', async () => {
+test('a missing bootstrap tool degrades to the full catalog with a warning', async () => {
   const { listeners, warns } = register({ bootstrapTools: ['bash', 'missing'] })
   const tools = [{ name: 'bash' }, { name: 'read' }]
   const result = await assemble(listeners['system-prompt/assemble'], [], tools)
   assert.deepEqual(result.tools, tools)
   assert.ok(warns.length >= 1)
-})
-
-test('legacy shellTools+commonTools mode still works', async () => {
-  const { listeners } = register({ shellTools: ['bash', 'pwsh'], commonTools: ['read'] })
-  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
-  const result = await assemble(listeners['system-prompt/assemble'], [], tools)
-  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
 })
 
 test('a durable tool call promotes the complete catalog', async () => {
@@ -144,10 +137,23 @@ test('suppressedContextSources is configurable per preset', async () => {
   assert.deepEqual(decision.messages.map(message => message.id), ['keep'])
 })
 
-test('the pre-step strip and the budget cap both register with prepend (upstream parity)', () => {
-  const { options } = register()
+test('without bootstrapMaxTokens no budget-cap listener is registered (adapter default flows)', () => {
+  const { listeners } = register({ ...EXACT_CONFIG })
+  assert.equal(listeners['agent/request'], undefined)
+})
+
+test('the pre-step strip and the optional budget cap register with prepend (upstream parity)', () => {
+  const { options } = register({ ...EXACT_CONFIG, bootstrapMaxTokens: 2048 })
   assert.deepEqual(options['agent/pre-step'], { prepend: true })
   assert.deepEqual(options['agent/request'], { prepend: true })
+})
+
+test('an opt-in bootstrapMaxTokens caps request #1 and is released after promotion', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, bootstrapMaxTokens: 2048 })
+  const capped = await request(listeners['agent/request'], [], { provider: 'x', model: 'y' })
+  assert.equal(capped.maxTokens, 2048)
+  const released = await request(listeners['agent/request'], [{ type: 'tool/call' }], { provider: 'x', model: 'y', maxTokens: 2048 })
+  assert.equal(released.maxTokens, undefined)
 })
 
 test('non-array pre-step messages pass through untouched', async () => {
@@ -163,14 +169,6 @@ test('reject decisions pass through untouched', async () => {
   assert.equal(decision.kind, 'reject')
 })
 
-test('first request is capped to bootstrapMaxTokens and the cap is released after promotion', async () => {
-  const { listeners } = register({ ...EXACT_CONFIG, bootstrapMaxTokens: 2048 })
-  const capped = await request(listeners['agent/request'], [], { provider: 'x', model: 'y' })
-  assert.equal(capped.maxTokens, 2048)
-  const released = await request(listeners['agent/request'], [{ type: 'tool/call' }], { provider: 'x', model: 'y', maxTokens: 2048 })
-  assert.equal(released.maxTokens, undefined)
-})
-
 test('promotion is memoized per session id within one process', async () => {
   const { listeners } = register()
   const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
@@ -182,9 +180,7 @@ test('promotion is memoized per session id within one process', async () => {
 
 test('invalid configs fail at apply time', () => {
   assert.throws(() => register({}), /bootstrapTools/)
-  assert.throws(() => register({ shellTools: ['bash'] }), /provided together/)
-  assert.throws(() => register({ ...EXACT_CONFIG, shellTools: ['bash'], commonTools: ['read'] }), /not both/)
-  assert.throws(() => register({ ...EXACT_CONFIG, bootstrapTools: [] }), /bootstrapTools/)
+  assert.throws(() => register({ bootstrapTools: [] }), /bootstrapTools/)
   assert.throws(() => register({ ...EXACT_CONFIG, suppressedContextSources: [''] }), /suppressedContextSources/)
   assert.throws(() => register({ ...EXACT_CONFIG, promoteOn: 'bogus' }), /promoteOn/)
   assert.throws(() => register({ ...EXACT_CONFIG, bootstrapMaxTokens: 0 }), /bootstrapMaxTokens/)

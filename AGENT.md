@@ -36,7 +36,8 @@ then rebase or merge the feature branch onto `agent-dev`.
 ## Automated upstream sync
 
 `.github/workflows/sync-upstream.yml` (present on both `main` and `agent-dev`,
-same content) runs daily and on manual `workflow_dispatch`:
+same content) runs every 15 minutes while upstream is in its fast-moving
+period, plus on manual `workflow_dispatch`:
 
 1. fetch `upstream/main`;
 2. rebase `main` onto `upstream/main` (with an `origin/main` race-guard rebase),
