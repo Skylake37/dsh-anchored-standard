@@ -2,12 +2,69 @@
 
 [English](./README.md)
 
-这是一个实验性的 DeepSeek Harness agent preset：第一次模型请求使用与 Minimal 对齐的
-完整 system prompt、Minimal 预设的真实工具 schema（`bash` + `str_replace_editor`），
-并且不注入工作区/技能上下文；会话记录首次持久晋升信号（`tool/call` 或首次
-`assistant/message`，先到者为准）后，开放 Standard 的完整工具目录并恢复常规上下文注入。
+实验性 DeepSeek Harness agent preset 集合——一个基础模式加两个变体：首轮模型请求锚定在
+Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文），会话产生持久信号后晋升到
+小型 resident 目录，重型 Standard 工具按需解锁。
 
 这是社区项目，并非 DeepSeek 官方 preset，也不代表 DeepSeek 的认可或背书。
+
+## 模式总览
+
+| 模式 | 目录 | 首次模型请求 | 锚定机制 | 晋升信号 | 代价 |
+|---|---|---|---|---|---|
+| Anchored Standard | `preset/` | 2 个工具（Minimal 对） | Minimal 工具 schema | 首次持久 `tool/call` **或** `assistant/message`（`promoteOn: either`） | 无 |
+| Zero-Anchored Standard | `zero-anchored-standard/` | 0 个工具 | 一轮固定锚定消息 | 锚定回复（`assistant/message`） | 多一次模型调用 |
+| Whoami Standard | `whoami-standard/` | 0 个工具 | 一轮"你是谁"自我介绍 | 自我介绍回复（`assistant/message`） | 多一次模型调用 |
+
+每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。
+
+## 术语
+
+- **轨迹（trajectory）**——模型首条思维链的风格。Minimal 条件产生 "We need…" 首行；
+  Standard 条件产生 "Let me…"（standard-like）首行。
+- **锚定（anchor）**——决定首轮轨迹的首请求条件。Issue #11 分离出三个杠杆：
+  工具 schema、输出预算、注入提醒。
+- **bootstrap 阶段**——会话的请求 #1：bootstrap 工具对、无自动注入上下文、可选输出封顶。
+- **晋升（promotion）**——结束 bootstrap 阶段的持久会话事件。基础模式：首次
+  `tool/call` 或 `assistant/message`（先到者为准）；变体：锚定回复。
+- **持久（durable）**——已写入会话事件日志。阶段状态从持久事件推导，resume 和
+  reload 不丢失。
+- **resident 目录**——晋升后的工具集：bootstrap 对 + 发现工具 + 模型已显式解锁的工具。
+- **发现工具（discovery tools）**——`dev_tool_search`、`skill_search`、`skill_load`：
+  重型 Standard 工具的按需解锁面。
+- **物化副本（materialized copy）**——`shared/` 插件在模式目录内的已提交副本，由
+  `npm run sync` 生成。
+
+## 工作原理
+
+基础模式的请求生命周期（变体只改首轮，见各自章节）：
+
+```
+用户第一条消息
+        │
+        ▼
+┌ 请求 #1 ─ bootstrap 阶段 ─────────────────────────────────┐
+│ 工具   : bash + str_replace_editor（Minimal 真实工具对）  │
+│ 上下文 : 无 AGENTS.md 摘要、无技能目录提醒                │
+│ 预算   : adapter 默认值（`bootstrapMaxTokens` 可选）      │
+└────────────────────────────────────────────────────────────┘
+        │ 首次持久 tool/call 或 assistant/message
+        ▼ 晋升——从持久事件推导，resume 安全
+┌ 请求 #2 起 ─ resident 阶段 ───────────────────────────────┐
+│ 工具   : bootstrap 对 + 发现工具 + 已解锁工具             │
+│ 上下文 : 恢复常规注入                                     │
+│ 预算   : adapter 默认值（封顶在晋升时剥离）               │
+└────────────────────────────────────────────────────────────┘
+```
+
+决定首轮轨迹的三个杠杆（issue #11）：
+
+1. **工具 schema**——adapter 默认 maxTokens（256000）下的决定变量。真实 Minimal 对
+   5/5 锚定；所有 standard 系 schema 11/11 落入 standard-like。
+2. **输出预算**——首请求 1024 封顶同样能锚定轨迹（26/32），且独立于工具描述。
+   基础模式不设此杠杆（`bootstrapMaxTokens` 为 opt-in）。
+3. **注入提醒**——AGENTS.md/CLAUDE.md 摘要和可用技能提醒。技能目录在场时锚定完全
+   无法复现（0/9）；bootstrap 期间两者都被剥离。
 
 ## 为什么这样做
 
@@ -15,23 +72,23 @@ DeepSeek V4 Pro 会强烈依赖 API 中可见的工具目录选择执行轨迹�
 Standard 和 PTC 分别得到 91、92 分，官方 Minimal 得到 99、96 分；但如果全程停留在
 Minimal，又会失去 Standard 的大部分工具。
 
-Anchored Standard 把“首次轨迹选择”和“后续完整工具能力”拆开：
+Anchored Standard 把"首次轨迹选择"和"后续完整工具能力"拆开：
 
 1. 保持 Minimal 的完整 system prompt；
 2. 首次模型请求暴露 Minimal 预设的**真实工具 schema**——持久 `bash` +
-   `str_replace_editor`，与官方 Minimal 组装逐字节一致。Issue #11 实测：在 adapter
-   默认 maxTokens（256000）下该 schema 5/5 锚定（首行 `We need…`，`let me` 为 0），
-   而所有 standard 系 schema（pwsh/read、仅 pwsh、沙箱 bash/read）11/11 落入
-   standard-like——256000 下工具 schema 身份是首轮锚定的决定变量，因此无需输出
-   封顶；
+   `str_replace_editor`，与官方 Minimal 组装逐字节一致（上述杠杆 1）；
 3. 首次请求同时剥离自动注入的上下文——AGENTS.md/CLAUDE.md 工作区摘要和可用技能
    目录提醒，真正的 Minimal 根本不挂载这两个插件（`tool-bootstrap` 行的
-   `suppressedContextSources`）。用户主动的技能手势不被过滤，且两者从请求 #2 起
-   原样恢复；
+   `suppressedContextSources`；杠杆 3）。用户主动的技能手势不被过滤，且两者从
+   请求 #2 起原样恢复；
 4. 会话出现首次持久晋升信号（`tool/call` 或首次 `assistant/message`，先到者为准）
-   后开放全部 Standard 工具——请求 #1 恒为 bootstrap 目录，请求 #2 起恒为完整目录，
-   纯文字首答不再把会话困死在 bootstrap（`tool-bootstrap` 行的 `promoteOn` 可选
-   `either` 默认 / `tool-call` / `assistant-message`）；
+   后晋升到 **resident 目录**：bootstrap 对 + 发现工具 + 模型已通过
+   `dev_tool_search` 显式解锁的工具。晋升时一次性倒出完整 Standard 目录会把轨迹
+   拉回 standard-like（晋升后回退问题），因此重型工具——`web_search`、`subagent`、
+   `workflow` 等——保持一次 `dev_tool_search` 即可取用。请求 #1 恒为 bootstrap
+   目录，请求 #2 恒为 resident 目录，纯文字首答不再把会话困死在 bootstrap
+   （`tool-bootstrap` 行的 `promoteOn` 可选 `either` 默认 / `tool-call` /
+   `assistant-message`）；
 5. 从持久 session event 推导阶段，resume 和 reload 不会丢失状态。
 
 所有平台的 bootstrap 目录相同：Minimal 工具对（`bash`/`str_replace_editor`）。preset
@@ -48,8 +105,9 @@ Project2 V4.1b、DeepSeek V4 Pro、`reasoningEffort=max`、Windows 原生环境�
 | r1 | 98 | 193 | 179 | 88 | 1 | 1 |
 | r2 | 99 | 162 | 165 | 98 | 0 | 1 |
 
-两轮都只出现两份工具目录快照：首次为 Minimal 两工具，随后为 25 项 Standard 工具。
-这证明该方案在本题同配置下可以复现，不代表它对所有模型和任务都普遍增益。
+两轮都只出现两份工具目录快照：首次为 Minimal 两工具，随后为 25 项 Standard 工具
+（这两轮早于晋升后收窄到 resident 目录的改动——见[工作原理](#工作原理)）。这证明该
+方案在本题同配置下可以复现，不代表它对所有模型和任务都普遍增益。
 
 跨版本证据（issue #11，Windows + 官方端点，只统计首请求轨迹）：adapter 默认
 maxTokens 下，Minimal 工具 schema 5/5 锚定（首行 `We need modify…`，`we` 1.4，
@@ -58,6 +116,58 @@ maxTokens 下，Minimal 工具 schema 5/5 锚定（首行 `We need modify…`，
 
 完整方法和聚合证据见
 [`xiaobright/modeltest`](https://github.com/xiaobright/modeltest)。
+
+## 配置参考
+
+所有开关都是各模式 `agent.cordis.yml` 中的行。未知键在 preset 挂载时报错。
+
+`tool-bootstrap`（位于 `preset/agent.cordis.yml`；该行必须保持 FIRST——瀑布注册顺序
+决定首请求剥离是否生效）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `bootstrapTools` | `[bash, str_replace_editor]` | 请求 #1 可见的工具。 |
+| `promoteOn` | `either` | 晋升触发：`either` / `tool-call` / `assistant-message`。 |
+| `bootstrapMaxTokens` | 未设 | 请求 #1 的可选输出封顶；晋升后剥离。 |
+| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | bootstrap 期间剥离的 `source.kind`；`[]` 关闭过滤。 |
+| `compactionTools` | `[]` | compaction 边界到再晋升之间可用的额外工具。 |
+
+`zero-tool-bootstrap`（位于 `zero-anchored-standard/` 和 `whoami-standard/`）：
+`suppressedContextSources` 与 `compactionTools` 语义相同（晋升恒为首次
+`assistant/message`），另有 `includeSubagents`——子 agent 是否也走锚定阶段
+（`whoami-standard` 设 `true`，`zero-anchored-standard` 为 `false`）。
+
+`anchor-turn`（两个变体）：`text`——合成的首条用户消息（zero-anchored 默认
+"This round is a test. Tools are not open yet; all tools will open next round."，
+whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定轮。
+
+`instruction-hint`（所有模式）：`promoteOn` 与各模式晋升语义对齐（基础模式
+`either`，变体 `assistant-message`）——那条一次性的"存在指令文件，先读再动手"
+提示等晋升后才注入。
+
+## 仓库布局
+
+```
+preset/                  Anchored Standard——基础模式
+zero-anchored-standard/  变体：固定零工具锚定轮
+whoami-standard/         变体："你是谁"锚定轮，子 agent 继承
+shared/                  多模式共用插件的唯一源
+scripts/sync-modes.mjs   把 shared/ 插件物化到每个模式目录
+test/                    零依赖测试套件（npm test）
+verify/                  一次性 headless 验证 runner
+```
+
+不变量，由 `npm run check` 强制：
+
+- 每个模式目录自包含：单独复制即可安装；`agent.cordis.yml` 的行只能引用
+  `./本地.mjs`，绝不允许 `../`。
+- 多模式共用插件只在 `shared/` 存一份；模式目录里的副本是生成的。编辑 `shared/`、
+  运行 `npm run sync`、两者一起提交——绝不直接改物化副本。
+- `tool-bootstrap` 行保持 `preset/agent.cordis.yml` 的 FIRST 行。
+
+本仓库刻意不提供 AGENTS.md/CLAUDE.md：这套 preset 的机制核心就是干净的首请求——
+恰恰要从首请求里剥离这些指令文件摘要（issue #6：注入在场时 0/9 锚定）。仓库里放
+一个只会喂给后续轮次，与被文档描述的机制自相矛盾。助手需要的一切都在本 README 中。
 
 ## 兼容范围
 
@@ -105,10 +215,6 @@ cp -R preset "$dsh_home/.agent-presets/anchored-standard"
 完整重启 DeepSeek Harness，新建空 session，选择 **Anchored Standard (experimental)**。
 不要在已经产生内容的会话中途切换 preset。
 
-多个模式共享的插件集中放在 `shared/` 目录，由 `npm run sync` 物化到各模式目录
-（`npm test` 会校验物化副本是否新鲜）。修改共享插件时，请编辑 `shared/` 中的源文件，
-运行 `npm run sync` 后一并提交；不要直接编辑模式目录里的物化副本。
-
 ## 验证加载
 
 导出 session JSONL，检查 `request/header`。复现清单（issue #11 明确要求前两项，
@@ -122,8 +228,10 @@ cp -R preset "$dsh_home/.agent-presets/anchored-standard"
   Standard 的 `pwsh`/`read`。
 - 第一次请求的消息中不应包含 AGENTS.md/CLAUDE.md 摘要或可用技能目录提醒——只有
   用户消息与 Minimal persona 系统提示；
-- 首次工具调用或首次助手回复后，下一份变更 header 应包含完整 Standard 目录；
-- 此后的请求应保持完整目录，并恢复常规上下文注入。
+- 首次工具调用或首次助手回复后，下一份变更 header 应包含晋升后的 resident 目录：
+  bootstrap 对 + `dev_tool_search`/`skill_search`/`skill_load` + 模型已解锁的工具；
+- 此后的请求应保持该 resident 集（只通过显式 `dev_tool_search` 解锁增长），并恢复
+  常规上下文注入。
 
 本仓库的零依赖测试：
 
@@ -134,17 +242,17 @@ npm test
 ## 重要行为
 
 - 默认 `promoteOn: either`：会话在首次持久 `tool/call` **或** 首次 `assistant/message`
-  （先到者为准）后晋升——请求 #1 见 bootstrap 目录，之后所有请求见完整目录；纯文字
-  首答也会在请求 #2 晋升。改为 `promoteOn: tool-call` 可恢复原行为（首答不调工具则
-  永不晋升）；
+  （先到者为准）后晋升——请求 #1 见 bootstrap 目录，之后所有请求见 resident 目录；
+  纯文字首答也会在请求 #2 晋升。改为 `promoteOn: tool-call` 可恢复原行为（首答不调
+  工具则永不晋升）；
 - 工具执行即使失败，只要 `tool/call` 已持久化，下一步仍会晋升；
 - 首请求输出预算默认**不**封顶：Minimal 工具 schema 在 adapter 默认 maxTokens 下
   即可锚定，`bootstrapMaxTokens` 是 opt-in。设置后首请求被封顶，晋升后显式去掉
   封顶（下一次请求的 seed proposal 会继承上一份 header 的 maxTokens）；
-- Minimal 工具对在晋升后仍然挂载，因此晋升目录 = Standard 目录 + `bash`（持久）
-  和 `str_replace_editor`——Standard 的沙箱 `bash` 行被禁用，改用持久 shell（同名、
-  同层，见“为什么这样做”）。`read`/`write`/`edit` 继续使用沙箱文件系统，
-  `str_replace_editor` 使用 preset 自己的本地 fs；
+- 晋升目录是 **resident 集**——bootstrap 对 + 发现工具 + 模型经 `dev_tool_search`
+  解锁的一切——而非完整 Standard 倒出。Standard 的沙箱 `bash` 行保持禁用，改用
+  持久 shell（同名、同层，见"为什么这样做"）。`read`/`write`/`edit` 解锁后继续使用
+  沙箱文件系统，`str_replace_editor` 使用 preset 自己的本地 fs；
 - bootstrap 工具缺失时降级为完整目录并一次性告警，不再让请求失败，组合漂移不会锁死
   会话；非法的 `promoteOn` 值会在 preset 挂载时报错；
 - 晋升判定按会话在进程内记忆化，持久事件扫描每会话每进程只执行一次。
@@ -152,7 +260,8 @@ npm test
   中的消息（默认 `agent-instructions` 与 `skill-catalog`，即 Standard 比 Minimal 多出的
   两项自动注入）。设为 `[]` 可关闭上下文过滤；加入其他 `source.kind` 可抑制更多。
   过滤器自身出错时降级为保留全部消息，绝不吞掉上下文。
-- 工具目录只变化一次，因此第一、第二次请求之间也会发生一次前缀缓存变化；
+- 工具目录在晋升时变化一次，之后每次 `dev_tool_search` 解锁新工具再变化；前缀缓存
+  连续性在这些点上断开；
 - preset 与 shell 访问具有相同信任等级，安装前应自行审阅文件；
 - 插件不会发起网络请求，也不增加遥测。
 
@@ -165,10 +274,10 @@ npm test
 1. 用户发出第一条消息时，`anchor-turn` 插件会把固定消息——"This round is a
    test. Tools are not open yet; all tools will open next round."——插到它前面；
 2. 第一个真实模型请求携带 **0 个工具**，首条思维链因此走零注入的 "we" 轨迹；
-3. 锚定回复落库后开放完整 Standard 目录，真实消息带着全部工具继续。
+3. 锚定回复落库后开放 resident 目录，真实消息带着它继续。
 
 锚定发生在第一条消息到达时而不是会话创建时，因此新建会话仍然可以先切换模式；
-子 agent 始终看到完整目录。
+子 agent 始终看到 resident 目录。
 
 实测行为（opencode-go、DeepSeek V4 Pro、`reasoningEffort=max`）：锚定请求稳定
 为 "we" 风格且 `let me` 为 0；后续带工具请求会回到 "The user wants…/Let me"
@@ -201,10 +310,10 @@ cp -R zero-anchored-standard "$dsh_home/.agent-presets/zero-anchored-standard"
    发现类工具）已解锁，重型 Standard 工具一次 `dev_tool_search` 即可取用。
 
 锚定文本可通过 `anchor-turn` 行的 `text` 配置（默认"你是谁"）。锚定发生在第一条
-消息到达时而非会话创建时，新建会话仍可先切换模式。设置 `includeSubagents: true`
-后，子 agent 也会继承同样的流程：首轮先做"你是谁"自我介绍、工具为 0，真正的委托
-任务在下一轮带着 resident 目录执行。代价是每个会话固定多一次模型调用——即使第一
-条消息很紧急也会先跑自我介绍轮。
+消息到达时而非会话创建时，新建会话仍可先切换模式。`includeSubagents: true`
+（本模式默认开启）后，子 agent 也会继承同样的流程：首轮先做"你是谁"自我介绍、
+工具为 0，真正的委托任务在下一轮带着 resident 目录执行。代价是每个会话固定多一次
+模型调用——即使第一条消息很紧急也会先跑自我介绍轮。
 
 该目录自包含，可单独安装，也可与其他模式任意组合安装。
 
