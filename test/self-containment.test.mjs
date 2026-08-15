@@ -8,7 +8,12 @@ import test from 'node:test'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
 /** Every installable mode directory, each independently copy-installable. */
-const MODE_DIRS = ['preset', 'zero-anchored-standard', 'whoami-standard']
+const MODE_DIRS = [
+  'preset',
+  'zero-anchored-standard',
+  'whoami-standard',
+  'eternal-minimal',
+  ]
 
 test('no mode references plugins outside its own directory', () => {
   for (const dir of MODE_DIRS) {

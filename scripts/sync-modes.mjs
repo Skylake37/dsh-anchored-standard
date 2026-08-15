@@ -31,6 +31,7 @@ const MODES = [
   { dir: 'preset', own: ['tool-bootstrap.mjs'] },
   { dir: 'zero-anchored-standard', own: [] },
   { dir: 'whoami-standard', own: [] },
+  { dir: 'eternal-minimal', own: ['eternal-minimal.mjs'] },
 ]
 
 /** `name: ./xxx.mjs` rows in an agent.cordis.yml (local plugin references). */

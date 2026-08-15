@@ -17,6 +17,7 @@ Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文�
 | Anchored Standard | `preset/` | 2 个工具（Minimal 对） | Minimal 工具 schema | 首次持久 `tool/call` **或** `assistant/message`（`promoteOn: either`） | 无 |
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 个工具 | 一轮固定锚定消息 | 锚定回复（`assistant/message`） | 多一次模型调用 |
 | Whoami Standard | `whoami-standard/` | 0 个工具 | 一轮"你是谁"自我介绍 | 自我介绍回复（`assistant/message`） | 多一次模型调用 |
+| Eternal Minimal | `eternal-minimal/` | 永远只有 2 个工具 | 可见目录永不增长；重型工具经 `dshx` bash 网关真实执行 | 无（无阶段概念） | 无 |
 
 每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。
 
@@ -143,6 +144,18 @@ maxTokens 下，Minimal 工具 schema 5/5 锚定（首行 `We need modify…`，
 "This round is a test. Tools are not open yet; all tools will open next round."，
 whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定轮。
 
+
+`eternal-minimal`（位于 `eternal-minimal/`；该行必须保持 FIRST）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `guide` | `true` | 在系统提示追加简短 `dshx` 能力指南；`false` 保持 persona 字节纯净。 |
+| `gateway` | `true` | 拦截 `dshx` shell 命令并真实执行对应工具；`false` 只留裸 Minimal 对。 |
+| `gatewayCommand` | `dshx` | 拦截命令词。 |
+| `maxGatewayChars` | `12000` | 单次网关结果负载上限。 |
+| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | 每个请求都剥离（没有晋升边界）。 |
+
+
 `instruction-hint`（所有模式）：`promoteOn` 与各模式晋升语义对齐（基础模式
 `either`，变体 `assistant-message`）——那条一次性的"存在指令文件，先读再动手"
 提示等晋升后才注入。
@@ -153,6 +166,7 @@ whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定�
 preset/                  Anchored Standard——基础模式
 zero-anchored-standard/  变体：固定零工具锚定轮
 whoami-standard/         变体："你是谁"锚定轮，子 agent 继承
+eternal-minimal/         变体：Minimal 对永恒 + dshx bash 网关
 shared/                  多模式共用插件的唯一源
 scripts/sync-modes.mjs   把 shared/ 插件物化到每个模式目录
 test/                    零依赖测试套件（npm test）
@@ -349,6 +363,49 @@ cp -R whoami-standard "$dsh_home/.agent-presets/whoami-standard"
 重启 DeepSeek Harness，新建空白会话，选择 **Whoami Standard (experimental)**，
 然后发送第一条消息——自我介绍轮先跑，你的消息在下一轮带着完整工具被回答。
 
+## Think-Execute Standard（实验）
+## Eternal Minimal（实验）
+
+"让模型以为从未离开极简模式"：模型可见目录整个会话恒等于 Minimal 对
+（`bash` + `str_replace_editor`）——没有锚定轮、没有晋升、没有发现工具、
+目录永不增长——同时完整 Standard 工具集保持注册，并通过 `dshx` bash 网关
+**真实执行**：
+
+```
+dshx list                           # 列出所有网关工具
+dshx web_search '{"query": "..."}'  # 真实执行 web_search
+dshx read_image '{"path": "..."}'   # 真实执行 read_image
+```
+
+1. **永恒对**：`system-prompt/assemble` 在每个请求上只保留 shell +
+   `str_replace_editor`（思考步、compaction 后、子 agent——一切请求），
+   自动注入上下文全程剥离（没有按晋升边界抑制的概念）。
+2. **网关**：`tools/pre-execute` 监听器拦截以 `dshx` 开头的 bash 命令，经
+   `ctx.tools.execute()`（完整注册表管线——策略、guard、执行、渲染）分发，
+   并把渲染输出作为命令结果返回。deny 通道是派发前替换结果的唯一受支持
+   手段，因此网关负载带错误标记——每条负载都明确说明工具已执行、输出在后，
+   模型将其读作输出。真实工具确实跑了：用户看到真实效果（文件、搜索、
+   子 agent），与按名调用无异。
+3. **指南**：系统提示追加简短 `dshx` 能力指南（`guide: false` 可得字节纯净
+   的 Minimal persona），让模型在不增加第三个可见工具的前提下知道网关存在。
+
+网关拒绝分发 shell/`str_replace_editor` 本身（"请直接调用"），这也使递归不可能
+发生。未知工具、JSON 格式错误、工具失败都以可读负载返回。`gateway: false`
+可得到无拦截的纯双工具会话。
+
+以独立 preset id 安装：
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/eternal-minimal"
+cp -R eternal-minimal "$dsh_home/.agent-presets/eternal-minimal"
+```
+
+重启 DeepSeek Harness，新建空白会话，选择 **Eternal Minimal (experimental)**，
+照常工作——模型编写 shell 命令，`dshx …` 行真实运行重型 Standard 工具。
+
+## Deliberation Gate（实验）
 ## 官方生态要求
 
 DeepSeek 当前建议社区作者把插件放在自己的 GitHub 项目中，并为仓库添加
