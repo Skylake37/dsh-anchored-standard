@@ -377,12 +377,31 @@ real message is processed:
 
 The anchor text is configurable via the `anchor-turn` row's `text` option
 (default "你是谁"). Anchoring on the first message — not session creation —
-keeps the blank-session preset switcher usable. With `includeSubagents: true`
-(shipped enabled in this mode), subagents inherit the same flow: their first
-request is the whoami anchor with zero tools, and the delegated task runs on
-the next turn with the resident catalog. The trade-off is one extra model call
-per session: the anchor turn is always taken, even when the first message is
-urgent.
+keeps the blank-session preset switcher usable.
+
+### Full-powered subagents
+
+Whoami Standard ships with `includeSubagents: true` on both the
+`zero-tool-bootstrap` and `anchor-turn` rows, so subagents spawned from a
+session inherit the same anchor flow as top-level sessions:
+
+1. A newly spawned subagent's first model request sees only the "你是谁"
+   anchor on an empty tool catalog.
+2. The subagent's self-introduction reply is the promotion signal.
+3. The delegated prompt runs on the next turn with the promoted resident
+   catalog (shells, `str_replace_editor`, and the discovery tools).
+
+Set `includeSubagents: false` on both rows to restore the plain behavior,
+where subagents start with the resident catalog immediately. Each subagent
+costs one extra model call for its anchor turn — a delegation-heavy session
+pays it per subagent.
+
+`zero-anchored-standard` keeps subagents plain by default; enabling the same
+flow there means setting `includeSubagents: true` on its `zero-tool-bootstrap`
+and `anchor-turn` rows (its anchor text stays the fixed test notice).
+
+The trade-off of the mode itself is one extra model call per session: the
+anchor turn is always taken, even when the first message is urgent.
 
 The directory is self-contained; install it alone or alongside any other mode.
 

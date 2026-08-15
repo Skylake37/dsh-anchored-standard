@@ -310,10 +310,28 @@ cp -R zero-anchored-standard "$dsh_home/.agent-presets/zero-anchored-standard"
    发现类工具）已解锁，重型 Standard 工具一次 `dev_tool_search` 即可取用。
 
 锚定文本可通过 `anchor-turn` 行的 `text` 配置（默认"你是谁"）。锚定发生在第一条
-消息到达时而非会话创建时，新建会话仍可先切换模式。`includeSubagents: true`
-（本模式默认开启）后，子 agent 也会继承同样的流程：首轮先做"你是谁"自我介绍、
-工具为 0，真正的委托任务在下一轮带着 resident 目录执行。代价是每个会话固定多一次
-模型调用——即使第一条消息很紧急也会先跑自我介绍轮。
+消息到达时而非会话创建时，新建会话仍可先切换模式。
+
+### 全功能子 agent（full-powered subagents）
+
+Whoami Standard 默认在 `zero-tool-bootstrap` 与 `anchor-turn` 两行都设置了
+`includeSubagents: true`，因此会话派生的子 agent 与顶层会话继承同一套锚定流程：
+
+1. 新派生子 agent 的首个模型请求只看到"你是谁"锚定消息，工具目录为空；
+2. 子 agent 的自我介绍回复即晋升信号；
+3. 委托任务在下一轮执行，此时已带着晋升后的 resident 目录（shell、
+   str_replace_editor、发现类工具）。
+
+将两行的 `includeSubagents` 设为 `false` 可恢复普通行为（子 agent 直接以
+resident 目录起步）。每个子 agent 的锚定轮固定多一次模型调用——重委托的
+会话按子 agent 数量累计。
+
+`zero-anchored-standard` 默认保持子 agent 直接起步；若要在那里启用同样的
+流程，需在其 `zero-tool-bootstrap` 与 `anchor-turn` 行设置
+`includeSubagents: true`（其锚定文本仍是固定测试语）。
+
+本模式自身的代价是每个会话固定多一次模型调用——即使第一条消息很紧急也会先跑
+自我介绍轮。
 
 该目录自包含，可单独安装，也可与其他模式任意组合安装。
 
