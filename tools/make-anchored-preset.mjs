@@ -62,6 +62,8 @@ const PKG_TOOL_PWSH = '@deepseek-ai/dsh-tool-pwsh'
 const PKG_TOOL_FS = '@deepseek-ai/dsh-tool-fs'
 const PKG_PERSISTENT_BASH = '@deepseek-ai/dsh-tool-bash-persistent'
 const PKG_STR_REPLACE_EDITOR = '@deepseek-ai/dsh-tool-str-replace-editor'
+const PKG_TOOL_CORDIS = '@deepseek-ai/dsh-tool-cordis'
+const GUARDED_CORDIS_FILE = 'tool-cordis-guarded.mjs'
 
 /** Resolve the harness home: `$DSH_HOME`, else `~/.dsh`. */
 export function dshHome() {
@@ -323,6 +325,48 @@ export function stampMinimalToolRows(composition, bootstrapTools) {
   return { composition: result, appended, toolBashDisabled }
 }
 
+/**
+ * Patch the deployed @deepseek-ai/dsh-tool-cordis bundle into the guarded
+ * variant: identical tools, but the process-global Inspect provider
+ * registration is skipped (the providers are shared) when another
+ * cordis-family preset already owns them, so a stamped copy can mount in the
+ * same DSH process as its source preset. The guard matches on the exact
+ * deployed markers and throws on any other shape instead of guessing.
+ */
+export function patchGuardedBundle(text) {
+  const NAME_MARKER = 'const name = "tool-cordis";'
+  const REGISTER_MARKER = '\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => ctx.cordisInspect.register(provider), `tool-cordis: inspect ${provider.manifest.id}`);'
+  if (!text.includes(NAME_MARKER)) {
+    throw new Error(`guarded bundle patch: plugin name marker not found — unexpected ${PKG_TOOL_CORDIS} bundle shape`)
+  }
+  if (!text.includes(REGISTER_MARKER)) {
+    throw new Error('guarded bundle patch: registration loop marker not found — unexpected bundle shape')
+  }
+  const guardedLoop = [
+    '\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => {',
+    '\t\ttry {',
+    '\t\t\tctx.cordisInspect.register(provider);',
+    '\t\t} catch (error) {',
+    '\t\t\tconst message = String((error && error.message) || error);',
+    '\t\t\tif (!message.includes("already registered")) throw error;',
+    '\t\t\ttry { ctx.logger.warn(`tool-cordis-guarded: inspect provider "${provider.manifest.id}" already registered by another preset mount; sharing it`); } catch { /* logger unavailable */ }',
+    '\t\t}',
+    '\t}, `tool-cordis: inspect ${provider.manifest.id}`);',
+  ].join('\n')
+  return text
+    .replace(NAME_MARKER, 'const name = "tool-cordis-guarded";')
+    .replace(REGISTER_MARKER, guardedLoop)
+}
+
+/** Swap the shipped tool-cordis row to the local guarded bundle. */
+export function swapToolCordisRow(composition) {
+  const row = `- id: tool-cordis\n  name: '${PKG_TOOL_CORDIS}'`
+  if (!composition.includes(row)) {
+    throw new Error(`source mounts ${PKG_TOOL_CORDIS} but its row text was not found — refusing to guess`)
+  }
+  return composition.replace(row, `- id: tool-cordis\n  name: ./${GUARDED_CORDIS_FILE}`)
+}
+
 /** Read one scalar field from a simple `key: value` meta file. */
 export function readMetaField(text, key) {
   const match = new RegExp(`^\\s*${key}\\s*:\\s*(.*?)\\s*$`, 'm').exec(text)
@@ -485,6 +529,21 @@ export async function generateAnchoredPreset(options) {
     )
   }
   const stamped = stampMinimalToolRows(composition, bootstrapTools)
+  const hasCordisTool = hasToolRow(composition, PKG_TOOL_CORDIS)
+  let guardedBundle
+  let finalComposition = stamped.composition
+  if (hasCordisTool) {
+    if (options.guardCordisTools === undefined) {
+      throw new Error(
+        `source mounts ${PKG_TOOL_CORDIS}: its process-global Inspect provider registration collides with the `
+        + 'original preset when both mount in the same DSH process. Pass --guard-cordis-tools <path> to the deployed '
+        + 'bundle (e.g. <harness>/apps/cli/node_modules/@deepseek-ai/dsh-tool-cordis/lib/index.js); the generator '
+        + 'copies and patches it into the target and swaps the row.',
+      )
+    }
+    guardedBundle = patchGuardedBundle(await readUtf8(resolve(options.guardCordisTools)))
+    finalComposition = swapToolCordisRow(finalComposition)
+  }
   const template = options.defaults ?? await loadTemplateDefaults()
   const resolved = resolveOptions(options, template)
   const row = buildBootstrapRow(bootstrapTools, {
@@ -505,6 +564,7 @@ export async function generateAnchoredPreset(options) {
     bootstrapTools,
     appendedToolGroups: stamped.appended,
     toolBashDisabled: stamped.toolBashDisabled,
+    guardedCordisTools: hasCordisTool,
     row,
     meta: { name, description, order: resolved.order },
   }
@@ -513,7 +573,10 @@ export async function generateAnchoredPreset(options) {
   await mkdir(presetRoot, { recursive: true })
   await cp(source.dir, targetDir, { recursive: true, filter: skipNodeArtefacts })
   await writeFile(join(targetDir, HOOK_FILE_NAME), await readFile(HOOK_SOURCE, 'utf8'))
-  await writeFile(join(targetDir, COMPOSITION_FILE), insertBootstrapRow(stamped.composition, row))
+  await writeFile(join(targetDir, COMPOSITION_FILE), insertBootstrapRow(finalComposition, row))
+  if (guardedBundle !== undefined) {
+    await writeFile(join(targetDir, GUARDED_CORDIS_FILE), guardedBundle)
+  }
   await writeFile(join(targetDir, PRESET_META_FILE), patchPresetMeta(meta, plan.meta))
   return { plan, written: true }
 }
@@ -535,6 +598,7 @@ const VALUE_KEYS = new Map([
   ['max-tokens', 'bootstrapMaxTokens'],
   ['order', 'order'],
   ['suppress-sources', 'suppressedContextSources'],
+  ['guard-cordis-tools', 'guardCordisTools'],
 ])
 
 /** Parse the generator CLI. */
@@ -594,6 +658,13 @@ Options:
                             pair bash,str_replace_editor (upstream PR #14); the
                             generator stamps the Minimal tool groups when the
                             source preset lacks them.
+  --guard-cordis-tools <path>
+                            Deployed dsh-tool-cordis bundle to copy+patch into
+                            the target. REQUIRED when the source mounts
+                            tool-cordis: the guarded variant shares the
+                            process-global Inspect providers instead of
+                            re-registering, so the copy can mount alongside
+                            the source preset in the same DSH process.
   --promote-on <mode>       either | tool-call | assistant-message.
   --max-tokens <n>          OPT-IN first-request maxTokens cap. Omit to run at
                             the adapter default (upstream issue #11).
@@ -625,6 +696,7 @@ if (isMain) {
       process.stdout.write(`bootstrap tools: ${plan.bootstrapTools.join(', ')}\n`)
       if (plan.appendedToolGroups.length > 0) process.stdout.write(`appended groups: ${plan.appendedToolGroups.join(', ')}\n`)
       if (plan.toolBashDisabled) process.stdout.write('disabled standard tool-bash (persistent bash owns the bash name)\n')
+      if (plan.guardedCordisTools) process.stdout.write('guarded tool-cordis providers (coexistence with the source preset)\n')
       if (result.written) {
         process.stdout.write('Next: fully restart DeepSeek Harness, create a BLANK session, select the new preset, then verify the first request/header contains only the bootstrap tools.\n')
       }

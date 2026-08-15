@@ -14,9 +14,11 @@ import {
   loadTemplateDefaults,
   MINIMAL_BOOTSTRAP_TOOLS,
   parseArgs,
+  patchGuardedBundle,
   patchPresetMeta,
   readMetaField,
   stampMinimalToolRows,
+  swapToolCordisRow,
 } from '../../tools/make-anchored-preset.mjs'
 
 const STANDARD_COMPOSITION = `# leading comment block
@@ -48,6 +50,14 @@ const MINIMAL_COMPOSITION = `- id: pty
 const ARBITRARY_COMPOSITION = `- id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
 `
+
+const CORDIS_COMPOSITION = `${STANDARD_COMPOSITION}
+- id: tool-cordis
+  name: '@deepseek-ai/dsh-tool-cordis'
+`
+
+/** The two exact markers the guard patch matches in the deployed bundle. */
+const CORDIS_BUNDLE = 'const name = "tool-cordis";\n\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => ctx.cordisInspect.register(provider), `tool-cordis: inspect ${provider.manifest.id}`);\n'
 
 const META = `name: 标准模式
 description: 功能完整。
@@ -239,4 +249,46 @@ test('parseArgs maps CLI options and rejects unknown flags', () => {
   assert.equal(parsed.dryRun, true)
   assert.throws(() => parseArgs(['--nope']), /unknown option/)
   assert.throws(() => parseArgs(['--from']), /requires a value/)
+})
+
+test('patchGuardedBundle guards the registration and renames the plugin', () => {
+  const patched = patchGuardedBundle(CORDIS_BUNDLE)
+  assert.match(patched, /const name = "tool-cordis-guarded";/)
+  assert.match(patched, /already registered/)
+  assert.doesNotMatch(patched, /const name = "tool-cordis";/)
+  assert.throws(() => patchGuardedBundle('const name = "tool-cordis";'), /registration loop marker/)
+  assert.throws(() => patchGuardedBundle('no markers at all'), /plugin name marker/)
+})
+
+test('swapToolCordisRow swaps to the local guarded bundle', () => {
+  const swapped = swapToolCordisRow(CORDIS_COMPOSITION)
+  assert.match(swapped, /- id: tool-cordis\n  name: \.\/tool-cordis-guarded\.mjs/)
+  assert.doesNotMatch(swapped, /name: '@deepseek-ai\/dsh-tool-cordis'/)
+  assert.throws(() => swapToolCordisRow(STANDARD_COMPOSITION), /row text was not found/)
+})
+
+test('generateAnchoredPreset requires the guard bundle for tool-cordis sources and stamps it when given', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const cordisDir = await fixturePreset(root, 'cordis', CORDIS_COMPOSITION)
+  await assert.rejects(
+    generateAnchoredPreset({ from: cordisDir, to: 'cordis-anchored', root: join(root, 'out'), defaults: TEMPLATE_DEFAULTS }),
+    /--guard-cordis-tools/,
+  )
+  const bundlePath = join(root, 'deployed-index.js')
+  await writeFile(bundlePath, CORDIS_BUNDLE)
+  const result = await generateAnchoredPreset({
+    from: cordisDir,
+    to: 'cordis-anchored',
+    root: join(root, 'out'),
+    guardCordisTools: bundlePath,
+    defaults: TEMPLATE_DEFAULTS,
+  })
+  assert.equal(result.plan.guardedCordisTools, true)
+  const composition = await readFile(join(root, 'out', 'cordis-anchored', 'agent.cordis.yml'), 'utf8')
+  assert.match(composition, /name: \.\/tool-cordis-guarded\.mjs/)
+  assert.doesNotMatch(composition, /name: '@deepseek-ai\/dsh-tool-cordis'/)
+  const guarded = await readFile(join(root, 'out', 'cordis-anchored', 'tool-cordis-guarded.mjs'), 'utf8')
+  assert.match(guarded, /already registered/)
+  assert.match(guarded, /tool-cordis-guarded/)
 })

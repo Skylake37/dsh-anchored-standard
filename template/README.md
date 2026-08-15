@@ -126,8 +126,12 @@ node tools/make-anchored-preset.mjs --from standard --to standard-anchored
 - 钩子运行时对缺失 bootstrap 工具 fail-open（警告一次后暴露完整目录），
   不会 brick session。
 - 源 preset 若注册进程级全局服务（如 cordis 的 `tool-cordis` 向 `cordisInspect`
-  注册 Inspect provider），套壳副本与源 preset 在同一 DSH 进程只能挂载其一
-  ——先开者胜，后开者挂载失败。这是部署层单例注册的约束，模板无法消除；
-  处理办法是每进程只用一个（重启切换），或手工移除该行（失去对应工具）。
+  注册 Inspect provider），直接套壳会让副本与源 preset 在同一 DSH 进程只能
+  挂载其一（先开者胜，后开者整体挂载失败）。此时必须给
+  `--guard-cordis-tools <path>`（指向部署包的
+  `<harness>/apps/cli/node_modules/@deepseek-ai/dsh-tool-cordis/lib/index.js`）：
+  生成器会把该 bundle 复制进目标并打上"已注册则共享跳过"的守卫补丁、把行换成
+  本地 `./tool-cordis-guarded.mjs`，工具与原版逐字节等价。**先开源 preset、后开
+  副本**即可共存；反向顺序下原版仍是无条件注册，会挂载失败。
 - 生成的 preset 与 shell 同信任级；请审阅 `template/hook/tool-bootstrap.mjs`
   后再套用。
