@@ -212,6 +212,9 @@ export function apply(ctx, config) {
   })
 
   // Cap the first model request's output budget while bootstrapping.
+  // prepend: true keeps this listener the OUTERMOST transform of the
+  // agent/request waterfall (upstream parity, see PR #13), so a later
+  // listener can never override the first-round budget after we set it.
   ctx.on('agent/request', async (payload, next) => {
     const resolved = await next()
     const agent = payload.agent
@@ -229,7 +232,7 @@ export function apply(ctx, config) {
       ...resolved,
       maxTokens: bootstrapMaxTokens,
     }
-  })
+  }, { prepend: true })
 
   // Strip auto-injected first-step context during bootstrap. Registered first
   // (ordering contract) and prepended (same as upstream), this strip is the

@@ -8,7 +8,7 @@ workflow that maintains it, so upstream merges never conflict with local feature
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | **Upstream mirror + sync infra.** Fast-forwarded from `upstream/main` only. The only local file allowed here is `.github/workflows/sync-upstream.yml`; never add anything else. |
+| `main` | **Upstream mirror + sync infra.** Rebased onto `upstream/main` by the sync workflow, then force-pushed. The only local file allowed here is `.github/workflows/sync-upstream.yml`; never add anything else. |
 | `agent-dev` | **Working branch for all agent sessions.** Superset of `main`: upstream content + downstream template work (`template/`, `tools/`, `AGENT.md`, `CLAUDE.md`). Check it out and stay on it. |
 
 ## Branch usage
@@ -21,8 +21,9 @@ workflow that maintains it, so upstream merges never conflict with local feature
 ```sh
 git fetch upstream
 git switch main
-git merge --ff-only upstream/main
-git push origin main
+git pull --ff-only origin main
+git rebase upstream/main
+git push --force-with-lease origin main
 git switch agent-dev
 git merge main
 git push origin agent-dev
@@ -38,7 +39,8 @@ then rebase or merge the feature branch onto `agent-dev`.
 same content) runs daily and on manual `workflow_dispatch`:
 
 1. fetch `upstream/main`;
-2. fast-forward `main` to it and push `origin main`;
+2. rebase `main` onto `upstream/main` (with an `origin/main` race-guard rebase),
+   then push `origin main` with `--force-with-lease`;
 3. merge `main` into `agent-dev` and push `origin agent-dev`.
 
 On a failed sync step it opens (or comments on) a GitHub issue labeled

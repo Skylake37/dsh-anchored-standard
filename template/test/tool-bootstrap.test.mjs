@@ -144,9 +144,10 @@ test('suppressedContextSources is configurable per preset', async () => {
   assert.deepEqual(decision.messages.map(message => message.id), ['keep'])
 })
 
-test('the pre-step listener registers with prepend true (upstream parity)', () => {
+test('the pre-step strip and the budget cap both register with prepend (upstream parity)', () => {
   const { options } = register()
   assert.deepEqual(options['agent/pre-step'], { prepend: true })
+  assert.deepEqual(options['agent/request'], { prepend: true })
 })
 
 test('non-array pre-step messages pass through untouched', async () => {
