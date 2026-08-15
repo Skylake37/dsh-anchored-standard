@@ -77,12 +77,15 @@ tools/
   上游 anchored preset 的 `complete` persona 效果。默认文本在上游 Minimal
   原句后追加两句：opener 约束（`When working on a task, always open your
   reasoning with We need.`，本机实测首链稳定 "We need understand…"）和工具
-  解锁提示（`If a tool you need is not in your current tool list, do not
-  conclude it is unavailable: after your first tool call, use dev_tool_search
-  to unlock it.`，本机实测模型会照做而不是声称工具不存在）。如需恢复上游
-  逐字节原句，生成时
+  解锁指引（`If a tool you need is not in your current tool list, do not
+  conclude it is unavailable: after your first tool call, call dev_tool_search
+  with no query to list every unlockable tool, then unlock the exact names.`）。
+  如需恢复上游逐字节原句，生成时
   `--bootstrap-persona-text "You are a helpful software engineer assistant."`。
   该 persona 保持**整个 session**（晋升后不恢复源 persona）。
+- `dev_tool_search`（本地增强）：**不传 query（或 `query:"*"`）列出全部可解锁
+  工具名**；单关键词搜索用 OR 评分（多词不再返回空）；`toolNames` 解锁时会
+  校验名字并明确报告 unknown names——避免模型“搜不到就以为工具不存在”。
 - `delegationDepthExempt: true`：子 agent 默认跳过 bootstrap、直接进入
   resident 目录（同样保持干净 persona 与解锁提示）；`--bootstrap-subagents`
   让子代理也走受控阶段。

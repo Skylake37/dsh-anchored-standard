@@ -6,16 +6,20 @@
  * str_replace_editor + the discovery tools) instead of dumping the whole
  * Standard catalog at once. This plugin registers ONE small tool:
  *
- *  - `dev_tool_search` — search the FULL assembled catalog by keyword and
- *    return matching tool names with short descriptions; optionally unlock
- *    tools by exact name (array `toolNames`). Unlocked names are recorded as
- *    durable `tool/call` arguments, and tool-bootstrap.mjs's assemble filter
- *    exposes them from the next request on (resume-safe).
+ *  - `dev_tool_search` — list or search the FULL assembled catalog (the
+ *    executing agent's scope, so every preset-provided tool is visible) and
+ *    optionally unlock tools by exact name (array `toolNames`). Unlocked
+ *    names are recorded as durable `tool/call` arguments, and
+ *    tool-bootstrap.mjs's assemble filter exposes them from the next request
+ *    on (resume-safe).
  *
- * The tool description is deliberately an INDEX of what the minimal resident
- * set cannot do: the model should reach for dev_tool_search the moment a task
- * needs internet, delegation, workflows, goals, images, background jobs, or
- * multi-agent coordination — not try to work around them with bash.
+ * Usage design (user-measured): the model must be able to answer "what is
+ *  - call with NO query (or `query: "*"`) to list EVERY unlockable tool name;
+ *  - call with ONE keyword to search;
+ *  - unlock only exact names from that list via `toolNames`.
+ * Unknown unlock names are reported back explicitly instead of being
+ * silently ignored, so the model can correct its spelling instead of
+ * concluding the tool does not exist.
  */
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -24,7 +28,8 @@ export const name = 'dev-tool-search'
 /** The tools registry must exist before this tool can register. */
 export const inject = ['tools']
 
-const MAX_RESULTS = 25
+const MAX_RESULTS = 40
+const MAX_LIST_RESULTS = 80
 
 /** Minimal JSON schema compiler for tool parameters (zero dependencies). */
 function toJsonSchema(spec) {
@@ -58,6 +63,36 @@ const UNLOCKABLE_INDEX = [
   'ask_user_question — ask the user',
 ]
 
+/** First description line for one catalog entry. */
+function firstLine(text) {
+  return (text || '').split('\n')[0].slice(0, 90)
+}
+
+/**
+ * Keyword search over the full catalog. OR semantics with a match-score:
+ * every token that appears in the name/description contributes one point, so
+ * multi-word queries no longer collapse to "no matches"; the best partial
+ * matches come first.
+ */
+function searchSchemas(schemas, query, limit) {
+  const wanted = query.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean)
+  const scored = schemas.map((schema) => {
+    const name = schema.name.toLowerCase()
+    const haystack = `${name} ${(schema.description ?? '').toLowerCase()}`
+    let score = 0
+    for (const token of wanted) {
+      if (name.includes(token)) score += 2
+      else if (haystack.includes(token)) score += 1
+    }
+    return { schema, score }
+  })
+  return scored
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.schema.name.localeCompare(b.schema.name))
+    .slice(0, limit)
+    .map((entry) => entry.schema)
+}
+
 /** Register the model-facing `dev_tool_search` tool. */
 export function apply(ctx) {
   ctx.tools.register({
@@ -65,16 +100,16 @@ export function apply(ctx) {
     description: [
       'Discover and unlock tools that are NOT currently available.',
       '',
-      'This session starts with a minimal resident set: bash, str_replace_editor, skill_search, skill_load. Everything else is unlocked on demand through this tool.',
+      'This session starts with a minimal resident set: bash, str_replace_editor, skill_search, skill_load. Every other tool exists but is LOCKED; it becomes available only after you unlock it here.',
       '',
       'If the current task needs any of the following, call dev_tool_search FIRST — do not try to work around them with bash:',
       ...UNLOCKABLE_INDEX.map((line) => `- ${line}`),
       '',
-      'Usage: pass `query` to search the catalog (returns matching tool names + descriptions), then pass `toolNames` with exact names to unlock them. Unlocked tools appear from the next request on and stay unlocked for the session.',
+      'Usage: call with NO query (or query "*") to list EVERY unlockable tool name; call with ONE keyword (e.g. "subagent") to search; then unlock exact names with toolNames. Do NOT search several names at once and do NOT assume a tool is unavailable just because a search returned nothing — list first.',
     ].join('\n'),
     parameters: toJsonSchema({
-      query: { type: 'string', required: false, description: 'search keywords (e.g. "web", "subagent")' },
-      toolNames: { type: 'array', required: false, description: 'exact tool names to unlock', items: { type: 'string' } },
+      query: { type: 'string', required: false, description: 'ONE search keyword (e.g. "subagent", "web"); omit or use "*" to list every unlockable tool' },
+      toolNames: { type: 'array', required: false, description: 'exact tool names to unlock, taken from the list above', items: { type: 'string' } },
     }),
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { text: { type: 'string' } }, required: ['text'] },
@@ -83,13 +118,30 @@ export function apply(ctx) {
     async execute(args, exec) {
       const query = typeof args.query === 'string' ? args.query.trim() : ''
       const unlock = Array.isArray(args.toolNames) ? args.toolNames.filter((name) => typeof name === 'string' && name.length > 0) : []
-
       const lines = []
+
+      // The executing agent IS the viewing scope: preset tools register into
+      // the agent-scope layer of the tools registry, and schemas() with no
+      // scope only sees the global layer — every preset-provided tool would
+      // be invisible to keyword search (issue #24). Same pattern as the
+      // harness's own code mode (`registry.schemas(exec.agent)`).
+      const schemas = ctx.tools.schemas(exec?.agent)
+      const known = new Set(schemas.map((schema) => schema.name))
+
       if (unlock.length > 0) {
-        lines.push(`Unlocked for the next request: ${unlock.join(', ')}`)
+        const valid = unlock.filter((name) => known.has(name))
+        const unknown = unlock.filter((name) => !known.has(name))
+        if (valid.length > 0) lines.push(`Unlocked for the next request: ${valid.join(', ')}`)
+        if (unknown.length > 0) {
+          lines.push(`Unknown names (NOT unlocked): ${unknown.join(', ')} — call without query to list every unlockable name.`)
+        }
       }
+
       if (query.length === 0 && unlock.length === 0) {
-        lines.push('Provide `query` to search the catalog, or `toolNames` to unlock tools.')
+        const listed = [...schemas].sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAX_LIST_RESULTS)
+        lines.push(`All unlockable tools (${listed.length}):`)
+        for (const schema of listed) lines.push(`- ${schema.name}: ${firstLine(schema.description)}`)
+        lines.push('Unlock with dev_tool_search({"toolNames": ["<exact name>"]}).')
         return { text: lines.join('\n') }
       }
       if (query.length === 0) {
@@ -97,28 +149,20 @@ export function apply(ctx) {
       }
 
       try {
-        // The executing agent IS the viewing scope: preset tools register into
-        // the agent-scope layer of the tools registry, and schemas() with no
-        // scope only sees the global layer — every preset-provided tool would
-        // be invisible to keyword search (issue #24). Same pattern as the
-        // harness's own code mode (`registry.schemas(exec.agent)`).
-        const schemas = ctx.tools.schemas(exec?.agent)
-        const wanted = query.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean)
-        const matches = schemas
-          .filter((schema) => {
-            const haystack = `${schema.name} ${schema.description ?? ''}`.toLowerCase()
-            return wanted.every((token) => haystack.includes(token))
-          })
-          .slice(0, MAX_RESULTS)
-        if (matches.length === 0) {
-          lines.push(`No tools match "${query}".`)
-        } else {
-          lines.push(`Matching tools (${matches.length}):`)
-          for (const schema of matches) {
-            const desc = (schema.description || '').split('\n')[0].slice(0, 90)
-            lines.push(`- ${schema.name}: ${desc}`)
-          }
+        if (query === '*') {
+          const listed = [...schemas].sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAX_LIST_RESULTS)
+          lines.push(`All unlockable tools (${listed.length}):`)
+          for (const schema of listed) lines.push(`- ${schema.name}: ${firstLine(schema.description)}`)
           lines.push('Unlock with dev_tool_search({"toolNames": ["<exact name>"]}).')
+        } else {
+          const matches = searchSchemas(schemas, query, MAX_RESULTS)
+          if (matches.length === 0) {
+            lines.push(`No tools match "${query}" — call dev_tool_search with NO query to list every unlockable tool.`)
+          } else {
+            lines.push(`Matching tools (${matches.length}):`)
+            for (const schema of matches) lines.push(`- ${schema.name}: ${firstLine(schema.description)}`)
+            lines.push('Unlock with dev_tool_search({"toolNames": ["<exact name>"]}).')
+          }
         }
       } catch (error) {
         lines.push(`catalog search unavailable: ${String((error && error.message) || error)}`)

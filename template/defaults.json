@@ -3,6 +3,6 @@
   "delegationDepthExempt": true,
   "suppressedContextSources": ["agent-instructions", "skill-catalog"],
   "suppressedContextPlugins": ["@deepseek-ai/dsh-system-prompt"],
-  "bootstrapPersonaText": "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, use dev_tool_search to unlock it.",
+  "bootstrapPersonaText": "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names.",
   "compactionTools": ["read", "write", "edit", "glob", "grep", "todo_write", "ask_user_question"]
 }
