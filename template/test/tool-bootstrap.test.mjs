@@ -182,7 +182,51 @@ test('invalid configs fail at apply time', () => {
   assert.throws(() => register({}), /bootstrapTools/)
   assert.throws(() => register({ bootstrapTools: [] }), /bootstrapTools/)
   assert.throws(() => register({ ...EXACT_CONFIG, suppressedContextSources: [''] }), /suppressedContextSources/)
+  assert.throws(() => register({ ...EXACT_CONFIG, suppressedContextPlugins: [''] }), /suppressedContextPlugins/)
+  assert.throws(() => register({ ...EXACT_CONFIG, bootstrapPersonaText: '' }), /bootstrapPersonaText/)
+  assert.throws(() => register({ ...EXACT_CONFIG, bootstrapPersonaText: 42 }), /bootstrapPersonaText/)
   assert.throws(() => register({ ...EXACT_CONFIG, promoteOn: 'bogus' }), /promoteOn/)
   assert.throws(() => register({ ...EXACT_CONFIG, bootstrapMaxTokens: 0 }), /bootstrapMaxTokens/)
   assert.throws(() => register({ ...EXACT_CONFIG, delegationDepthExempt: 'yes' }), /delegationDepthExempt/)
+})
+
+test('bootstrapPersonaText swaps the persona section only while bootstrapping', async () => {
+  const MINIMAL_LINE = 'You are a helpful software engineer assistant.'
+  const { listeners } = register({ ...EXACT_CONFIG, bootstrapPersonaText: MINIMAL_LINE })
+  const assembly = {
+    system: 'x',
+    sections: [
+      { name: 'deployment:identity', text: 'harness identity' },
+      { name: 'deployment:persona', text: 'You are a coding agent powered by deepseek-v4-pro...' },
+      { name: 'tool:cordis', text: 'dynamic plugin guidance' },
+    ],
+    tools: [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }],
+  }
+  const bootstrapped = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p1') }, async () => assembly)
+  assert.equal(bootstrapped.sections.find(section => section.name === 'deployment:persona').text, MINIMAL_LINE)
+  assert.equal(bootstrapped.sections.find(section => section.name === 'tool:cordis').text, 'dynamic plugin guidance')
+  assert.deepEqual(bootstrapped.tools.map(tool => tool.name), ['pwsh', 'read'])
+  const promoted = await listeners['system-prompt/assemble'](undefined, { agent: agent([{ type: 'tool/call' }], {}, 'p1') }, async () => assembly)
+  assert.equal(promoted.sections.find(section => section.name === 'deployment:persona').text, 'You are a coding agent powered by deepseek-v4-pro...')
+  assert.deepEqual(promoted.tools.map(tool => tool.name), ['pwsh', 'read', 'write'])
+})
+
+test('bootstrapPersonaText is a graceful no-op when no persona section exists', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, bootstrapPersonaText: 'minimal' })
+  const assembly = { sections: [{ name: 'tool:cordis', text: 'x' }], tools: [{ name: 'pwsh' }, { name: 'read' }] }
+  const result = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p2') }, async () => assembly)
+  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+})
+
+test('suppressedContextPlugins strips those plugins while bootstrapping and restores after promotion', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'] })
+  const messages = [
+    { id: 'user', content: [] },
+    { id: 'snap', content: [], source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' } },
+    { id: 'mnem', content: [], source: { kind: 'plugin', plugin: 'dsh-mnemon' } },
+  ]
+  const decision = await prestep(listeners['agent/pre-step'], [], messages)
+  assert.deepEqual(decision.messages.map(message => message.id), ['user', 'mnem'])
+  const promoted = await prestep(listeners['agent/pre-step'], [{ type: 'assistant/message' }], messages)
+  assert.deepEqual(promoted.messages.map(message => message.id), ['user', 'snap', 'mnem'])
 })

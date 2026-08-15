@@ -26,6 +26,18 @@
  *    bootstrapping. An explicitly empty array disables the context filter
  *    while keeping the tool bootstrap. Config name follows upstream
  *    `preset/tool-bootstrap.mjs`.
+ *  - `suppressedContextPlugins: string[]` (default []) — first-step messages
+ *    whose `source.plugin` is listed here are ALSO removed while
+ *    bootstrapping (defaults stamped by the generator: the runtime-context
+ *    snapshot from `@deepseek-ai/dsh-system-prompt`). Restored from request
+ *    #2 on.
+ *  - `bootstrapPersonaText: string` (default unset) — while bootstrapping,
+ *    the `deployment:persona` section is replaced with this text; after
+ *    promotion the preset's own persona returns. Stamped by the generator
+ *    as the Minimal persona line so request #1 carries the same system
+ *    prompt as the upstream anchored preset. NOTE: only takes effect for
+ *    personas that are NOT `complete` — a complete persona is restored by
+ *    the registry after this waterfall and cannot be swapped.
  *  - `delegationDepthExempt: boolean` (default true) — subagents always see
  *    the full catalog; set false to bootstrap child sessions too.
  *
@@ -54,6 +66,9 @@ export const name = 'anchored-tool-bootstrap'
 export const inject = []
 
 const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions']
+
+/** The registry's persona section name (see @deepseek-ai/dsh-system-prompt). */
+const PERSONA_SECTION = 'deployment:persona'
 
 /** Durable session event types that count as a promotion signal per mode. */
 const PROMOTE_EVENTS = {
@@ -109,12 +124,23 @@ function optionalBool(value, field, fallback) {
   return value
 }
 
+/** Optional non-empty bootstrap persona text; `undefined` means no swap. */
+function optionalString(value, field) {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`${name}: ${field} must be a non-empty string`)
+  }
+  return value
+}
+
 /** Register the per-session bootstrap filters. */
 export function apply(ctx, config) {
   const bootstrapTools = stringList(config.bootstrapTools, 'bootstrapTools')
   const promoteEvents = parsePromoteOn(config.promoteOn)
   const bootstrapMaxTokens = optionalPositiveInt(config.bootstrapMaxTokens, 'bootstrapMaxTokens')
   const suppressedSources = sourceList(config.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
+  const suppressedPlugins = sourceList(config.suppressedContextPlugins, 'suppressedContextPlugins', [])
+  const bootstrapPersonaText = optionalString(config.bootstrapPersonaText, 'bootstrapPersonaText')
   const delegationDepthExempt = optionalBool(config.delegationDepthExempt, 'delegationDepthExempt', true)
 
   /** Sessions already promoted in this process. Promotion is append-only, so a Set is sound. */
@@ -162,12 +188,27 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Swap the persona section to the bootstrap persona while unpromoted, so
+   * request #1 carries the same system prompt as the upstream anchored
+   * preset. The registry reassembles every request from its own sections, so
+   * "restore after promotion" is automatic: the swap simply stops applying.
+   */
+  const applyBootstrapPersona = (assembled) => {
+    if (bootstrapPersonaText === undefined) return assembled
+    const index = assembled.sections.findIndex((section) => section.name === PERSONA_SECTION)
+    if (index === -1 || assembled.sections[index].text === bootstrapPersonaText) return assembled
+    const sections = assembled.sections.slice()
+    sections[index] = { ...sections[index], text: bootstrapPersonaText }
+    return { ...assembled, sections }
+  }
+
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     // Downstream errors propagate untouched; only this filter's own logic is guarded.
     const assembled = await next()
     try {
       if (isPromoted(context.agent)) return assembled
-      return applyBootstrap(assembled)
+      return applyBootstrapPersona(applyBootstrap(assembled))
     } catch (error) {
       // A filter bug must never brick a session: degrade to the full catalog.
       warnOnce(`${name}: bootstrap filter failed, exposing the full catalog: ${String((error && error.message) || error)}`)
@@ -210,11 +251,13 @@ export function apply(ctx, config) {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     try {
-      if (isPromoted(agent) || suppressedSources.size === 0) return decision
+      if (isPromoted(agent) || (suppressedSources.size === 0 && suppressedPlugins.size === 0)) return decision
       if (!Array.isArray(decision.messages)) return decision
       const kept = decision.messages.filter((message) => {
-        const kind = message?.source?.kind
-        return typeof kind !== 'string' || !suppressedSources.has(kind)
+        const source = message?.source
+        if (typeof source?.kind === 'string' && suppressedSources.has(source.kind)) return false
+        if (typeof source?.plugin === 'string' && suppressedPlugins.has(source.plugin)) return false
+        return true
       })
       return kept.length === decision.messages.length ? decision : { ...decision, messages: kept }
     } catch (error) {

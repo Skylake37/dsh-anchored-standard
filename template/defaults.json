@@ -1,5 +1,7 @@
 {
   "promoteOn": "either",
   "delegationDepthExempt": true,
-  "suppressedContextSources": ["agent-instructions", "skill-catalog"]
+  "suppressedContextSources": ["agent-instructions", "skill-catalog"],
+  "suppressedContextPlugins": ["@deepseek-ai/dsh-system-prompt"],
+  "bootstrapPersonaText": "You are a helpful software engineer assistant."
 }

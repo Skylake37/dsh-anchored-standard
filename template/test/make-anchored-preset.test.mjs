@@ -76,6 +76,8 @@ const TEMPLATE_DEFAULTS = {
   promoteOn: 'either',
   delegationDepthExempt: true,
   suppressedContextSources: ['agent-instructions', 'skill-catalog'],
+  suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'],
+  bootstrapPersonaText: 'You are a helpful software engineer assistant.',
 }
 
 test('detectBootstrapTools pins the PR14 Minimal pair for both supported families', () => {
@@ -116,9 +118,14 @@ test('buildBootstrapRow pins tools and omits the cap unless asked', () => {
   assert.match(uncapped, /bootstrapTools: \["bash", "str_replace_editor"\]/)
   assert.match(uncapped, /promoteOn: either/)
   assert.match(uncapped, /suppressedContextSources: \["agent-instructions", "skill-catalog"\]/)
+  assert.match(uncapped, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
+  assert.match(uncapped, /bootstrapPersonaText: "You are a helpful software engineer assistant\."/)
   assert.doesNotMatch(uncapped, /bootstrapMaxTokens/)
   const capped = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapMaxTokens: 1024 })
   assert.match(capped, /bootstrapMaxTokens: 1024/)
+  const bare = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapPersonaText: undefined, suppressedContextPlugins: [] })
+  assert.doesNotMatch(bare, /bootstrapPersonaText/)
+  assert.doesNotMatch(bare, /suppressedContextPlugins/)
 })
 
 test('insertBootstrapRow puts the hook row before every other entry and keeps leading comments', () => {
@@ -149,6 +156,8 @@ test('loadTemplateDefaults reads the PR14 defaults and carries no maxTokens defa
   assert.equal(defaults.promoteOn, 'either')
   assert.equal(defaults.delegationDepthExempt, true)
   assert.deepEqual(defaults.suppressedContextSources, ['agent-instructions', 'skill-catalog'])
+  assert.deepEqual(defaults.suppressedContextPlugins, ['@deepseek-ai/dsh-system-prompt'])
+  assert.equal(defaults.bootstrapPersonaText, 'You are a helpful software engineer assistant.')
   assert.equal('bootstrapMaxTokens' in defaults, false)
   assert.equal(DEFAULTS_SOURCE.href.includes('/template/defaults.json'), true)
 })
@@ -177,6 +186,8 @@ test('generateAnchoredPreset stamps a working anchored copy of a standard preset
   assert.match(composition, /name: \.\/tool-bootstrap\.mjs/)
   assert.match(composition, /bootstrapTools: \["bash", "str_replace_editor"\]/)
   assert.doesNotMatch(composition, /bootstrapMaxTokens/)
+  assert.match(composition, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
+  assert.match(composition, /bootstrapPersonaText: "You are a helpful software engineer assistant\."/)
   assert.match(composition, /- id: persistent-shell/)
   assert.match(composition, /- id: bootstrap-filesystem/)
   const hook = await readFile(join(target, 'tool-bootstrap.mjs'), 'utf8')
