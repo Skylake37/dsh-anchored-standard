@@ -112,5 +112,9 @@ node tools/make-anchored-preset.mjs --from standard --to standard-anchored
   cap + 上下文剥离”机制，不保证复现上游评测里的完整 anchor 条件。
 - 钩子运行时对缺失 bootstrap 工具 fail-open（警告一次后暴露完整目录），
   不会 brick session。
+- 源 preset 若注册进程级全局服务（如 cordis 的 `tool-cordis` 向 `cordisInspect`
+  注册 Inspect provider），套壳副本与源 preset 在同一 DSH 进程只能挂载其一
+  ——先开者胜，后开者挂载失败。这是部署层单例注册的约束，模板无法消除；
+  处理办法是每进程只用一个（重启切换），或手工移除该行（失去对应工具）。
 - 生成的 preset 与 shell 同信任级；请审阅 `template/hook/tool-bootstrap.mjs`
   后再套用。
