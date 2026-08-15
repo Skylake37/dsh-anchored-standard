@@ -195,8 +195,10 @@ cp -R zero-anchored-standard "$dsh_home/.agent-presets/zero-anchored-standard"
    发现类工具）已解锁，重型 Standard 工具一次 `dev_tool_search` 即可取用。
 
 锚定文本可通过 `whoami-turn` 行的 `text` 配置（默认"你是谁"）。锚定发生在第一条
-消息到达时而非会话创建时，新建会话仍可先切换模式；子 agent 始终看到完整目录。
-代价是每个会话固定多一次模型调用——即使第一条消息很紧急也会先跑自我介绍轮。
+消息到达时而非会话创建时，新建会话仍可先切换模式。设置 `includeSubagents: true`
+后，子 agent 也会继承同样的流程：首轮先做"你是谁"自我介绍、工具为 0，真正的委托
+任务在下一轮带着 resident 目录执行。代价是每个会话固定多一次模型调用——即使第一
+条消息很紧急也会先跑自我介绍轮。
 
 该预设通过 `../preset/` 引用与 anchored 的 `preset/` 目录共享插件模块，安装时
 请一并安装该目录（见上文"安装"章节）。

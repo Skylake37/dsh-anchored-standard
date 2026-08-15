@@ -68,9 +68,17 @@ test('sessions with a prior user message are not anchored again', () => {
   assert.equal(prepends.length, 0)
 })
 
-test('subagents are never anchored', () => {
+test('subagents are never anchored by default', () => {
   const listener = register()
   const { subject, prepends } = agent({ depth: 1 })
   listener({ agent: subject, message: { source: { kind: 'user' } } })
   assert.equal(prepends.length, 0)
+})
+
+test('subagents are anchored when includeSubagents is true', () => {
+  const listener = register({ includeSubagents: true })
+  const { subject, prepends } = agent({ depth: 1 })
+  listener({ agent: subject, message: { source: { kind: 'user' } } })
+  assert.equal(prepends.length, 1)
+  assert.equal(prepends[0].message.content[0].text, ANCHOR_TEXT)
 })

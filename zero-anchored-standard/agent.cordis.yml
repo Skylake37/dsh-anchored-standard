@@ -57,7 +57,8 @@
 # response is durable, later step assemblies narrow to the minimal RESIDENT
 # set (shells + str_replace_editor + the discovery tools + explicitly
 # unlocked tools) instead of the full Standard dump — the post-promotion
-# regression fix. Subagents always see the full catalog.
+# regression fix. By default subagents always see the full catalog; set
+# `includeSubagents: true` to make them follow the anchor phase too.
 #
 # The same phase gate suppresses AUTO-INJECTED context (`suppressedContextSources`,
 # default `['skill-catalog', 'agent-instructions']`) while the session is

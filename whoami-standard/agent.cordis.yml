@@ -54,14 +54,16 @@
 - id: dev-tool-search
   name: ../preset/dev-tool-search.mjs
 
-# V4 Pro conditions strongly on the API tool catalog. The first top-level
-# model request therefore carries ZERO tools: `whoami-turn` seeds the fixed
-# "你是谁" user message, this bootstrap strips the whole catalog, and the
-# model's self-introduction reply is the promotion signal. After that
-# assistant response is durable, later step assemblies narrow to the minimal
-# RESIDENT set (shells + str_replace_editor + the discovery tools + explicitly
-# unlocked tools) instead of the full Standard dump — the post-promotion
-# regression fix. Subagents always see the full catalog.
+# V4 Pro conditions strongly on the API tool catalog. The first model request
+# therefore carries ZERO tools: `whoami-turn` seeds the fixed "你是谁" user
+# message, this bootstrap strips the whole catalog, and the model's
+# self-introduction reply is the promotion signal. After that assistant
+# response is durable, later step assemblies narrow to the minimal RESIDENT
+# set (shells + str_replace_editor + the discovery tools + explicitly unlocked
+# tools) instead of the full Standard dump — the post-promotion regression
+# fix. Subagents also run the whoami anchor and zero-tool bootstrap
+# (`includeSubagents: true`); after the anchor reply they see the resident
+# catalog.
 #
 # The same phase gate suppresses AUTO-INJECTED context (`suppressedContextSources`,
 # default `['skill-catalog', 'agent-instructions']`) while the session is
@@ -78,6 +80,7 @@
   config:
     suppressedContextSources: [agent-instructions, skill-catalog]
     compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
+    includeSubagents: true
 
 # Seed the whoami anchor turn when the first user message arrives: the anchor
 # is prepended to the `next-turn` inbox queue ahead of the real message, and
@@ -85,11 +88,13 @@
 # request sees only "你是谁" with no tools, while the real input is claimed by
 # the NEXT turn — with the promoted resident catalog already unlocked.
 # Anchoring on first message — not session creation — keeps the blank-session
-# preset switcher usable. The anchor text is configurable via `text`.
+# preset switcher usable. The anchor text is configurable via `text`; set
+# `includeSubagents: true` so subagents also take the whoami anchor turn.
 - id: whoami-turn
   name: ./whoami-turn.mjs
   config:
     text: 你是谁
+    includeSubagents: true
 
 # ── shell ───────────────────────────────────────────────────────────────────
 

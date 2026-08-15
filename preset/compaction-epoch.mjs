@@ -15,10 +15,16 @@
  * State is memoized per session id and maintained incrementally through
  * `observe()`; a cold session scans its durable log once (so resume and
  * reload reconstruct the same phase), then O(1).
+ *
+ * By default subagents (`delegationDepth > 0`) are treated as already
+ * promoted so their first request can use tools. Set `includeSubagents: true`
+ * to make subagents follow the same bootstrap/anchor phase as top-level
+ * sessions.
  */
 
 /** Build one epoch-aware promotion tracker. */
-export function createEpochPromotion(promoteEvents) {
+export function createEpochPromotion(promoteEvents, options = {}) {
+  const includeSubagents = options.includeSubagents === true
   const promote = new Set(promoteEvents)
   /** sessionId -> { boundary, promoted } */
   const state = new Map()
@@ -53,8 +59,9 @@ export function createEpochPromotion(promoteEvents) {
       if (agent === undefined) return { boundary: -1, promoted: true }
       const session = agent.session
       if (session === undefined) return { boundary: -1, promoted: true }
-      // Subagents keep the full catalog from their very first request.
-      if ((session.header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
+      // By default subagents keep the full catalog from their very first
+      // request; includeSubagents makes them follow the normal bootstrap phase.
+      if (!includeSubagents && (session.header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
       return state.get(session.id) ?? scan(session)
     },
     /** Incremental feed: call on every `session/event`. */
