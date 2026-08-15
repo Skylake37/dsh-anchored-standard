@@ -73,12 +73,14 @@ tools/
   都剥离运行时上下文快照消息（等价上游 persona 行的
   `includeRuntimeContext: false`）。
 - `bootstrapPersonaText`（下游扩展）：把 system prompt 收敛成**只有 persona
-  一节**的 Minimal 原句——harness 身份块、Web 朝向、工具指引、运行时快照小节
-  全部去掉，等价于上游 anchored preset 的 `complete` persona 效果。该干净
-  persona 保持**整个 session**（晋升后不恢复源 persona）——实测晋升后恢复源
-  persona 会把后续轮次拉回 standard 轨迹（这正是“工具给早了/又变 Let me”的
-  根因之一）。若确实需要晋升后恢复源 persona，去掉
-  `bootstrapPersonaText` 自行权衡。
+  一节**——harness 身份块、Web 朝向、工具指引、运行时快照小节全部去掉，等价于
+  上游 anchored preset 的 `complete` persona 效果。默认文本在上游 Minimal
+  原句后追加一句 opener 约束（`When working on a task, always open your
+  reasoning with We need.`），本机实测这让首链稳定 "We need understand…"；
+  如需恢复上游逐字节原句，生成时
+  `--bootstrap-persona-text "You are a helpful software engineer assistant."`。
+  该 persona 保持**整个 session**（晋升后不恢复源 persona）——实测晋升后恢复
+  源 persona 会把后续轮次拉回 standard 轨迹。
 - `delegationDepthExempt: true`：子 agent 默认跳过 bootstrap、直接进入
   resident 目录（同样保持干净 persona）；`--bootstrap-subagents` 让子代理也
   走受控阶段。
