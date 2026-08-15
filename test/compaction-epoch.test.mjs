@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createEpochPromotion } from '../preset/compaction-epoch.mjs'
+import { createEpochPromotion } from '../shared/compaction-epoch.mjs'
 
 const session = (events, header = {}, id = 's') => ({ id, events, header })
 

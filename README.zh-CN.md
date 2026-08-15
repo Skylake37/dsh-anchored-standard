@@ -80,7 +80,9 @@ Standard 组装的完整快照；升级 Harness 后，应先对照上游改动�
 ## 安装
 
 克隆本仓库，将整个 `preset` 目录复制到用户 preset 根目录，并将目标目录命名为
-`anchored-standard`。
+`anchored-standard`。仓库中的每个模式目录都是自包含的：`zero-anchored-standard/`
+与 `whoami-standard/` 变体以同样方式安装，可只装其中一个、多个或全部，不依赖
+其他目录（见下文各自的章节）。
 
 PowerShell：
 
@@ -102,6 +104,10 @@ cp -R preset "$dsh_home/.agent-presets/anchored-standard"
 
 完整重启 DeepSeek Harness，新建空 session，选择 **Anchored Standard (experimental)**。
 不要在已经产生内容的会话中途切换 preset。
+
+多个模式共享的插件集中放在 `shared/` 目录，由 `npm run sync` 物化到各模式目录
+（`npm test` 会校验物化副本是否新鲜）。修改共享插件时，请编辑 `shared/` 中的源文件，
+运行 `npm run sync` 后一并提交；不要直接编辑模式目录里的物化副本。
 
 ## 验证加载
 
@@ -187,21 +193,20 @@ cp -R zero-anchored-standard "$dsh_home/.agent-presets/zero-anchored-standard"
 提示（"你是谁"），用户的第一条真实消息自动推迟到下一轮。无论你第一条发什么，
 会话都会先热身一轮，等你真实的消息进来时一切就绪：
 
-1. 用户发出第一条消息时，`whoami-turn` 插件把固定消息——"你是谁"——prepend 到
+1. 用户发出第一条消息时，`anchor-turn` 插件把固定消息——"你是谁"——prepend 到
    `next-turn` 收件队列、排在真实消息前面；
 2. dsh 每轮只消费一条 `next-turn` 消息，因此第一个模型请求只看到锚定消息、
    携带 **0 个工具**，模型回复自我介绍，该回复即晋升信号；
 3. 下一轮才轮到真实消息，此时晋升后的 resident 目录（shell、str_replace_editor、
    发现类工具）已解锁，重型 Standard 工具一次 `dev_tool_search` 即可取用。
 
-锚定文本可通过 `whoami-turn` 行的 `text` 配置（默认"你是谁"）。锚定发生在第一条
+锚定文本可通过 `anchor-turn` 行的 `text` 配置（默认"你是谁"）。锚定发生在第一条
 消息到达时而非会话创建时，新建会话仍可先切换模式。设置 `includeSubagents: true`
 后，子 agent 也会继承同样的流程：首轮先做"你是谁"自我介绍、工具为 0，真正的委托
 任务在下一轮带着 resident 目录执行。代价是每个会话固定多一次模型调用——即使第一
 条消息很紧急也会先跑自我介绍轮。
 
-该预设通过 `../preset/` 引用与 anchored 的 `preset/` 目录共享插件模块，安装时
-请一并安装该目录（见上文"安装"章节）。
+该目录自包含，可单独安装，也可与其他模式任意组合安装。
 
 以独立 preset id 安装：
 

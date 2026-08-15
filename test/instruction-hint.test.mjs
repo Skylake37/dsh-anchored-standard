@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name } from '../preset/instruction-hint.mjs'
+import { apply, name } from '../shared/instruction-hint.mjs'
 
 const PROJ_FILES = ['AGENTS.md', 'CLAUDE.md']
 const GLOBAL_FILES = []

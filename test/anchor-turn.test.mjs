@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ANCHOR_TEXT, apply, name } from '../zero-anchored-standard/anchor-turn.mjs'
+import { ANCHOR_TEXT, apply, name } from '../shared/anchor-turn.mjs'
 
 function register(config = {}) {
   let listener
@@ -54,6 +54,14 @@ test('config text overrides the default anchor', () => {
   assert.equal(prepends[0].message.content[0].text, custom)
 })
 
+test('the whoami preset text seeds a self-introduction anchor', () => {
+  const listener = register({ text: '你是谁' })
+  const { subject, prepends } = agent()
+  listener({ agent: subject, message: { source: { kind: 'user' } } })
+  assert.equal(prepends.length, 1)
+  assert.equal(prepends[0].message.content[0].text, '你是谁')
+})
+
 test('plugin-sourced messages never re-anchor', () => {
   const listener = register()
   const { subject, prepends } = agent()
@@ -68,9 +76,17 @@ test('sessions with a prior user message are not anchored again', () => {
   assert.equal(prepends.length, 0)
 })
 
-test('subagents are never anchored', () => {
+test('subagents are never anchored by default', () => {
   const listener = register()
   const { subject, prepends } = agent({ depth: 1 })
   listener({ agent: subject, message: { source: { kind: 'user' } } })
   assert.equal(prepends.length, 0)
+})
+
+test('subagents are anchored when includeSubagents is true', () => {
+  const listener = register({ includeSubagents: true })
+  const { subject, prepends } = agent({ depth: 1 })
+  listener({ agent: subject, message: { source: { kind: 'user' } } })
+  assert.equal(prepends.length, 1)
+  assert.equal(prepends[0].message.content[0].text, ANCHOR_TEXT)
 })

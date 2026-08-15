@@ -159,7 +159,7 @@
           * Please avoid commands that may produce a very large amount of output.
           * Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
 
-# Windows-only `bash` tool (see preset/custom-bash.mjs): registers the SAME
+# Windows-only `bash` tool (see custom-bash.mjs): registers the SAME
 # tool name as the persistent shell with a Minimal-compatible description, but
 # executes through the ordinary cross-platform subprocess seam (`bash -c`)
 # instead of a PTY. `bashPath` defaults to `bash` on PATH; point it at Git

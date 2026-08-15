@@ -98,7 +98,10 @@ so review upstream changes before using it with a newer release.
 ## Install
 
 Clone this repository, then copy the entire `preset` directory into the user
-preset root under the id `anchored-standard`.
+preset root under the id `anchored-standard`. Every mode directory in this
+repository is self-contained: the `zero-anchored-standard/` and
+`whoami-standard/` variants install the same way, alone or together, with no
+other directory required (see their sections below).
 
 PowerShell:
 
@@ -121,6 +124,11 @@ cp -R preset "$dsh_home/.agent-presets/anchored-standard"
 Fully restart DeepSeek Harness, create a blank session, and select
 **Anchored Standard (experimental)**. Do not switch an active session from a
 different preset.
+
+Plugins shared by several modes live once in `shared/` and are materialized
+into each mode directory by `npm run sync` (`npm test` verifies freshness).
+To change a shared plugin, edit it in `shared/`, run `npm run sync`, and
+commit both; never edit the materialized copies inside a mode directory.
 
 ## Verify
 
@@ -230,7 +238,7 @@ user's real first message is deferred to the next turn. Whatever the user types
 first, the session warms up exactly one round and everything is ready when the
 real message is processed:
 
-1. When the user sends their first message, the `whoami-turn` plugin prepends a
+1. When the user sends their first message, the `anchor-turn` plugin prepends a
    fixed user message — "你是谁" (who are you) — ahead of it in the `next-turn`
    inbox queue.
 2. dsh claims exactly ONE `next-turn` message per turn, so the first model
@@ -240,17 +248,15 @@ real message is processed:
    catalog (shells, `str_replace_editor`, the discovery tools) already
    unlocked — heavier Standard tools are one `dev_tool_search` away.
 
-The anchor text is configurable via the `whoami-turn` row's `text` option
-(default "你是谁"). Anchoring on the first message — not session creation —
+The anchor text is configurable via the `anchor-turn` row's `text` option
+(default "你是谁"). Anchoring on the first message — not on session creation —
 keeps the blank-session preset switcher usable. With `includeSubagents: true`,
 subagents inherit the same flow: their first request is the whoami anchor with
 zero tools, and the delegated task runs on the next turn with the resident
 catalog. The trade-off is one extra model call per session: the anchor turn is
 always taken, even when the first message is urgent.
 
-The preset shares plugin modules with the anchored `preset/` directory via
-`../preset/` references, so install that directory as well (see the Install
-section above).
+The directory is self-contained; install it alone or alongside any other mode.
 
 Install as a separate preset id:
 
