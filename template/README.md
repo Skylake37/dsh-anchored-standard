@@ -75,15 +75,17 @@ tools/
 - `bootstrapPersonaText`（下游扩展）：把 system prompt 收敛成**只有 persona
   一节**——harness 身份块、Web 朝向、工具指引、运行时快照小节全部去掉，等价于
   上游 anchored preset 的 `complete` persona 效果。默认文本在上游 Minimal
-  原句后追加一句 opener 约束（`When working on a task, always open your
-  reasoning with We need.`），本机实测这让首链稳定 "We need understand…"；
-  如需恢复上游逐字节原句，生成时
+  原句后追加两句：opener 约束（`When working on a task, always open your
+  reasoning with We need.`，本机实测首链稳定 "We need understand…"）和工具
+  解锁提示（`If a tool you need is not in your current tool list, do not
+  conclude it is unavailable: after your first tool call, use dev_tool_search
+  to unlock it.`，本机实测模型会照做而不是声称工具不存在）。如需恢复上游
+  逐字节原句，生成时
   `--bootstrap-persona-text "You are a helpful software engineer assistant."`。
-  该 persona 保持**整个 session**（晋升后不恢复源 persona）——实测晋升后恢复
-  源 persona 会把后续轮次拉回 standard 轨迹。
+  该 persona 保持**整个 session**（晋升后不恢复源 persona）。
 - `delegationDepthExempt: true`：子 agent 默认跳过 bootstrap、直接进入
-  resident 目录（同样保持干净 persona）；`--bootstrap-subagents` 让子代理也
-  走受控阶段。
+  resident 目录（同样保持干净 persona 与解锁提示）；`--bootstrap-subagents`
+  让子代理也走受控阶段。
 
 ## 快速开始
 
