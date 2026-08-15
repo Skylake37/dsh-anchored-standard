@@ -69,14 +69,19 @@ tools/
   后显式剥离；compaction 重置后再次生效）。
 - `suppressedContextSources: [agent-instructions, skill-catalog]`：受控阶段
   剥离自动注入的 AGENTS.md 摘要和技能目录；空数组关闭剥离。
-- `suppressedContextPlugins: [@deepseek-ai/dsh-system-prompt]`：同时剥离
-  运行时上下文快照消息（下游扩展）。
-- `bootstrapPersonaText`（下游扩展）：受控阶段把 system prompt 收敛成
-  **只有 persona 一节**的 Minimal 原句——harness 身份块、Web 朝向、工具指引、
-  运行时快照小节全部去掉，等价于上游 anchored preset 的 `complete` persona
-  效果；晋升后恢复源 preset persona。
+- `suppressedContextPlugins: [@deepseek-ai/dsh-system-prompt]`：**每个请求**
+  都剥离运行时上下文快照消息（等价上游 persona 行的
+  `includeRuntimeContext: false`）。
+- `bootstrapPersonaText`（下游扩展）：把 system prompt 收敛成**只有 persona
+  一节**的 Minimal 原句——harness 身份块、Web 朝向、工具指引、运行时快照小节
+  全部去掉，等价于上游 anchored preset 的 `complete` persona 效果。该干净
+  persona 保持**整个 session**（晋升后不恢复源 persona）——实测晋升后恢复源
+  persona 会把后续轮次拉回 standard 轨迹（这正是“工具给早了/又变 Let me”的
+  根因之一）。若确实需要晋升后恢复源 persona，去掉
+  `bootstrapPersonaText` 自行权衡。
 - `delegationDepthExempt: true`：子 agent 默认跳过 bootstrap、直接进入
-  resident 目录；`--bootstrap-subagents` 让子代理也走受控阶段。
+  resident 目录（同样保持干净 persona）；`--bootstrap-subagents` 让子代理也
+  走受控阶段。
 
 ## 快速开始
 

@@ -264,7 +264,7 @@ test('controlled pre-step strips default and plugin-suppressed context sources',
   assert.deepEqual(decision.messages.map((message) => message.id), ['user', 'mnem', 'gesture'])
 })
 
-test('promoted pre-step keeps every injected context message', async () => {
+test('promoted pre-step keeps source kinds but strips plugin-suppressed messages permanently', async () => {
   const { listeners } = register({ ...EXACT_CONFIG, suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'] })
   const messages = [
     { id: 'user', content: [], source: { kind: 'user' } },
@@ -272,7 +272,7 @@ test('promoted pre-step keeps every injected context message', async () => {
     { id: 'snap', content: [], source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' } },
   ]
   const decision = await prestep(listeners['agent/pre-step'], [{ type: 'tool/call' }], messages)
-  assert.deepEqual(decision.messages, messages)
+  assert.deepEqual(decision.messages.map((message) => message.id), ['user', 'skills'])
 })
 
 test('explicit empty suppression lists disable the context filter', async () => {
@@ -306,16 +306,21 @@ test('delegationDepthExempt false bootstraps subagents too', async () => {
   assert.deepEqual(result.tools.map((tool) => tool.name), ['bash', 'str_replace_editor'])
 })
 
-test('bootstrapPersonaText reduces the controlled prompt to the sole Minimal persona section', async () => {
+test('bootstrapPersonaText keeps the sole Minimal persona section for the WHOLE session', async () => {
   const { listeners } = register({ ...EXACT_CONFIG, bootstrapPersonaText: MINIMAL_LINE })
   const tools = [{ name: 'bash' }, { name: 'str_replace_editor' }, { name: 'write' }]
   const bootstrapped = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p1') }, async () => fullAssembly(tools))
   assert.deepEqual(bootstrapped.sections, [{ name: 'deployment:persona', text: MINIMAL_LINE }])
   assert.deepEqual(bootstrapped.contexts, [])
   assert.deepEqual(bootstrapped.tools.map((tool) => tool.name), ['bash', 'str_replace_editor'])
+  // Permanent clean prompt: the promoted phase must NOT restore the source
+  // persona sections (that restoration pulled later rounds back to the
+  // standard trajectory).
   const promoted = await listeners['system-prompt/assemble'](undefined, { agent: agent([{ type: 'tool/call' }], {}, 'p1-promoted') }, async () => fullAssembly(tools))
-  assert.deepEqual(promoted.sections, fullAssembly(tools).sections)
-  assert.deepEqual(promoted.contexts, fullAssembly(tools).contexts)
+  assert.deepEqual(promoted.sections, [{ name: 'deployment:persona', text: MINIMAL_LINE }])
+  assert.deepEqual(promoted.contexts, [])
+  // Resident set: the bootstrap pair (write stays locked until dev_tool_search).
+  assert.deepEqual(promoted.tools.map((tool) => tool.name), ['bash', 'str_replace_editor'])
 })
 
 test('bootstrapPersonaText is a graceful no-op when no persona section exists', async () => {

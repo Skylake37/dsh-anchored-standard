@@ -137,9 +137,12 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Reduce the assembled prompt to the clean Minimal system prompt while
-   * controlled (downstream extension): the persona section alone, carrying
-   * the bootstrap text, and no runtime contexts.
+   * Reduce the assembled prompt to the clean Minimal system prompt for the
+   * WHOLE session (downstream extension): the persona section alone, carrying
+   * the bootstrap text, and no runtime contexts. Upstream keeps its complete
+   * Minimal persona permanently; restoring the source persona after the
+   * anchor reply is what pulled the real-message turn back to the standard
+   * trajectory.
    */
   const applyBootstrapPrompt = (assembled) => {
     if (bootstrapPersonaText === undefined) return assembled
@@ -163,15 +166,16 @@ export function apply(ctx, config) {
         // str_replace_editor + the discovery tools + whatever the model
         // explicitly unlocked via dev_tool_search — instead of dumping the
         // whole Standard catalog at once (the post-promotion regression fix).
+        // The clean Minimal prompt stays PERMANENT (see the header note).
         const available = new Set(assembled.tools.map((tool) => tool.name))
         const keep = new Set([
           ...SHELLS.filter((name) => available.has(name)),
           'str_replace_editor', ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(context.agent?.session),
         ])
-        return {
+        return applyBootstrapPrompt({
           ...assembled,
           tools: assembled.tools.filter((tool) => keep.has(tool.name)),
-        }
+        })
       }
       const { boundary } = status
       // First request (no compaction yet): zero tools, the "we" anchor.
@@ -202,17 +206,20 @@ export function apply(ctx, config) {
   })
 
   // Strip injected reminders (skill catalog, AGENTS.md) during the controlled
-  // phase. Same registration discipline as the anchored variant: `prepend`
-  // keeps the strip the OUTERMOST transform of the agent/pre-step waterfall.
+  // phase; the plugin list (runtime-context snapshot) is stripped on EVERY
+  // request, mirroring the upstream preset's includeRuntimeContext: false.
+  // Same registration discipline as the anchored variant: `prepend` keeps the
+  // strip the OUTERMOST transform of the agent/pre-step waterfall.
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     try {
-      if (promotion.status(agent).promoted || (suppressedSources.size === 0 && suppressedPlugins.size === 0)) return decision
+      if (suppressedSources.size === 0 && suppressedPlugins.size === 0) return decision
       if (!Array.isArray(decision.messages)) return decision
+      const promoted = promotion.status(agent).promoted
       const kept = decision.messages.filter((message) => {
         const source = message?.source
-        if (typeof source?.kind === 'string' && suppressedSources.has(source.kind)) return false
+        if (!promoted && typeof source?.kind === 'string' && suppressedSources.has(source.kind)) return false
         if (typeof source?.plugin === 'string' && suppressedPlugins.has(source.plugin)) return false
         return true
       })

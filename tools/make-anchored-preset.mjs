@@ -970,12 +970,15 @@ Options:
   --order <n>               Preset order. Default: 5.
   --suppress-sources <a,b>  Controlled-phase context kinds to strip; empty list
                             disables.
-  --suppress-plugins <a,b>  Controlled-phase messages from these source.plugin
-                            names to strip; empty list disables.
+  --suppress-plugins <a,b>  Messages from these source.plugin names are
+                            stripped on EVERY request (default: the runtime
+                            snapshot); empty list disables.
   --bootstrap-persona-text <text>
-                            System prompt persona used while controlled
-                            (default: the Minimal persona line); restored to
-                            the source persona after promotion.
+                            Clean Minimal persona kept for the WHOLE session
+                            (controlled and promoted phases alike, upstream
+                            complete-persona parity); the source persona is
+                            never restored, because restoring it pulled later
+                            rounds back to the standard trajectory.
   --compaction-tools <a,b>  Core work set exposed after compaction/end before
                             re-promotion. Default from template/defaults.json.
   --win-bash-path <path>    Git Bash executable for the Windows custom-bash

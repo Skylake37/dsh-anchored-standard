@@ -25,19 +25,20 @@
  *    false` to make them follow the same bootstrap phase.
  *
  * Downstream template extensions:
- *  - `bootstrapPersonaText`: while controlled, the `deployment:persona`
- *    section is replaced with this text AND every other section is dropped,
- *    so the request carries the same clean system prompt as the upstream
- *    anchored preset (persona section only). After promotion the preset's own
- *    sections return. NOTE: only takes effect for personas that are NOT
- *    `complete` — a complete persona is restored by the registry after this
- *    waterfall and cannot be swapped; for complete personas the sections are
- *    left untouched (their persona is already the only section the registry
- *    will keep).
- *  - `suppressedContextPlugins`: controlled-phase messages whose
- *    `source.plugin` is listed here are ALSO removed (defaults stamped by the
- *    generator: the runtime-context snapshot from
- *    `@deepseek-ai/dsh-system-prompt`).
+ *  - `bootstrapPersonaText`: the `deployment:persona` section is replaced
+ *    with this text AND every other section is dropped for the WHOLE
+ *    session (controlled and promoted phases alike), so every request
+ *    carries the same clean system prompt as the upstream anchored preset
+ *    (persona section only). Upstream keeps its complete Minimal persona
+ *    permanently; restoring the source persona after promotion is what
+ *    pulled later rounds back to the standard trajectory (the post-promotion
+ *    regression the user measured). NOTE: only takes effect for personas
+ *    that are NOT `complete` — a complete persona is restored by the
+ *    registry after this waterfall and cannot be swapped.
+ *  - `suppressedContextPlugins`: messages whose `source.plugin` is listed
+ *    here are removed on EVERY request (defaults stamped by the generator:
+ *    the runtime-context snapshot from `@deepseek-ai/dsh-system-prompt`),
+ *    mirroring the upstream preset's `includeRuntimeContext: false`.
  *
  * Ordering contract (keep this row FIRST in the composition):
  *  - This plugin deliberately has NO inject list. Registered before
@@ -263,8 +264,11 @@ export function apply(ctx, config) {
         // PROMOTED: keep the minimal resident set — the bootstrap pair + the
         // discovery tools + whatever the model explicitly unlocked via
         // dev_tool_search — instead of dumping the whole catalog at once.
+        // The clean Minimal prompt is PERMANENT (see the header note): the
+        // source persona returning here is what pulled later rounds back to
+        // the standard trajectory.
         const keep = new Set([...bootstrapTools, ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(context.agent?.session)])
-        return keepTools(assembled, keep, false)
+        return applyBootstrapPrompt(keepTools(assembled, keep, false))
       }
       // Controlled phase: the bootstrap pair; after a compaction, plus the
       // compaction work set so mid-task work can continue.
@@ -303,19 +307,24 @@ export function apply(ctx, config) {
     }, { prepend: true })
   }
 
-  // Strip auto-injected context while controlled. Registered first (ordering
-  // contract) and prepended (upstream parity), this strip is the final
-  // waterfall transform and removes what later listeners inject.
+  // Strip auto-injected context. The source kinds (skill-catalog,
+  // agent-instructions) are stripped while controlled only (upstream parity);
+  // the plugin list (default: the runtime-context snapshot) is stripped on
+  // EVERY request, mirroring the upstream preset's includeRuntimeContext:
+  // false. Registered first (ordering contract) and prepended (upstream
+  // parity), this strip is the final waterfall transform and removes what
+  // later listeners inject.
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     // Downstream errors propagate untouched; only this filter's own logic is guarded.
     const decision = await next()
     if (decision.kind === 'reject') return decision
     try {
-      if (promotion.status(agent).promoted || (suppressedSources.size === 0 && suppressedPlugins.size === 0)) return decision
+      if (suppressedSources.size === 0 && suppressedPlugins.size === 0) return decision
       if (!Array.isArray(decision.messages)) return decision
+      const promoted = promotion.status(agent).promoted
       const kept = decision.messages.filter((message) => {
         const source = message?.source
-        if (typeof source?.kind === 'string' && suppressedSources.has(source.kind)) return false
+        if (!promoted && typeof source?.kind === 'string' && suppressedSources.has(source.kind)) return false
         if (typeof source?.plugin === 'string' && suppressedPlugins.has(source.plugin)) return false
         return true
       })
