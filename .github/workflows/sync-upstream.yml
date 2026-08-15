@@ -33,13 +33,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Fast-forward main to upstream
+      - name: Rebase main onto upstream
         id: sync-main
         run: |
           git switch main
           git pull --ff-only origin main
-          git merge --ff-only upstream/main
-          git push origin main
+          git rebase upstream/main
+          git fetch origin main
+          git rebase origin/main
+          git push --force-with-lease origin main
 
       - name: Merge main into agent-dev
         id: sync-agent-dev
@@ -62,7 +64,7 @@ jobs:
           body="Automated upstream sync failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
           Failed step(s):
-          - fast-forward main to upstream: $MAIN_FAILED
+          - rebase main onto upstream: $MAIN_FAILED
           - merge main into agent-dev: $DEV_FAILED
 
           Resolve locally:
@@ -70,15 +72,16 @@ jobs:
           \`\`\`sh
           git fetch upstream
           git switch main
-          git merge --ff-only upstream/main
-          git push origin main
+          git pull --ff-only origin main
+          git rebase upstream/main
+          git push --force-with-lease origin main
           git switch agent-dev
           git merge main
           # fix conflicts, commit, push
           git push origin agent-dev
           \`\`\`
 
-          If main was pushed to directly, restore the pure mirror first:
+          If main accumulated unexpected local commits, restore the mirror first:
 
           \`\`\`sh
           git switch main
