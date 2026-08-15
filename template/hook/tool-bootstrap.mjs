@@ -1,61 +1,43 @@
 /**
- * Reusable anchored tool bootstrap hook — stamp this file into any preset and
+ * Reusable anchored tool bootstrap — stamp this file into any preset and
  * register it as the FIRST row of the preset's agent.cordis.yml.
  *
- * Behavior per session:
- *  - While a session is in its bootstrap phase, every model request sees the
- *    pinned bootstrap tool surface (default upstream finding: the official
- *    Minimal preset's real pair — persistent `bash` + `str_replace_editor`),
- *    the CLEAN Minimal system prompt (only the persona section with
- *    `bootstrapPersonaText`; the harness identity, orientation, tool
- *    guidance, and runtime-context sections are dropped, mirroring the
- *    Minimal preset's `complete` persona), and no auto-injected
- *    workspace/skill context.
- *  - Two-phase modes (`either`, `tool-call`, `assistant-message`): after the
- *    session records its first durable promotion signal, every later request
- *    sees the preset's own full catalog, full persona, and the normal
- *    context injections again. Upstream issues #17/#18 measured that the
- *    promoted rounds fall back to the standard "Let me" trajectory.
- *  - `never` (the downstream default): the bootstrap phase lasts for the
- *    WHOLE session — every top-level request keeps the Minimal tool pair,
- *    the clean Minimal system prompt, and the context strip, so every
- *    reasoning chain stays on the "We need" trajectory (the issue #16
- *    minimal-turbo finding). Subagents still see the full phase by default
- *    (`delegationDepthExempt`).
- *  - The phase is derived from durable session events, so resume and reload
- *    preserve it; promotion decisions are memoized per session id per process.
+ * Behavior per session (mirrors upstream preset/tool-bootstrap.mjs, with the
+ * downstream template extensions listed below):
+ *  - While the session is in the controlled phase, request #1 sees the pinned
+ *    bootstrap tool surface (default upstream finding: the official Minimal
+ *    preset's real pair — persistent `bash` + `str_replace_editor`) and no
+ *    auto-injected workspace/skill context.
+ *  - After the session records its first durable promotion signal (default:
+ *    the first `tool/call` OR the first `assistant/message`, whichever comes
+ *    first), later requests see the promoted RESIDENT catalog — the bootstrap
+ *    pair PLUS the discovery tools (`dev_tool_search`, `skill_search`,
+ *    `skill_load`) PLUS whatever the model explicitly unlocked through
+ *    `dev_tool_search`. The full preset catalog is NOT dumped at once, because
+ *    the 25-tool dump pulls the trajectory back to standard-like behavior;
+ *    heavier tools stay one `dev_tool_search` call away.
+ *  - Promotion is epoch-aware (upstream compaction-epoch): after
+ *    `compaction/end` the session falls back to the controlled phase — the
+ *    bootstrap pair plus `compactionTools` — until a NEW durable promotion
+ *    signal exists past that boundary. The first post-compaction request is a
+ *    "second first request".
+ *  - Subagents are always promoted by default; set `delegationDepthExempt:
+ *    false` to make them follow the same bootstrap phase.
  *
- * Config (all values come from the row that mounts this file):
- *  - `bootstrapTools: string[]` — required exact bootstrap tool list.
- *  - `promoteOn: either | tool-call | assistant-message | never`
- *    (default `either`; the downstream generator defaults to `never`).
- *  - `bootstrapMaxTokens: positive int` — OPT-IN FIRST-REQUEST output cap.
- *    Omit it to let the adapter default flow: the Minimal tool schema anchors
- *    at the adapter-default maxTokens without a cap (upstream issue #11).
- *    When set, only the first request of a session is capped and the cap is
- *    stripped afterwards (in `never` mode there is no promotion, so the
- *    "first request only" rule is what keeps the cap from persisting).
- *  - `suppressedContextSources: string[]` (default `skill-catalog`,
- *    `agent-instructions`) — first-step message kinds removed while
- *    bootstrapping. An explicitly empty array disables the context filter
- *    while keeping the tool bootstrap. Config name follows upstream
- *    `preset/tool-bootstrap.mjs`.
- *  - `suppressedContextPlugins: string[]` (default []) — first-step messages
- *    whose `source.plugin` is listed here are ALSO removed while
- *    bootstrapping (defaults stamped by the generator: the runtime-context
- *    snapshot from `@deepseek-ai/dsh-system-prompt`). Restored from request
- *    #2 on.
- *  - `bootstrapPersonaText: string` (default unset) — while bootstrapping,
- *    the `deployment:persona` section is replaced with this text AND every
- *    other section is dropped, so the request carries the same clean system
- *    prompt as the upstream anchored preset (persona section only). After
- *    promotion the preset's own sections return. NOTE: only takes effect for
- *    personas that are NOT `complete` — a complete persona is restored by
- *    the registry after this waterfall and cannot be swapped; for complete
- *    personas the sections are left untouched (their persona is already the
- *    only section the registry will keep).
- *  - `delegationDepthExempt: boolean` (default true) — subagents always see
- *    the full catalog; set false to bootstrap child sessions too.
+ * Downstream template extensions:
+ *  - `bootstrapPersonaText`: while controlled, the `deployment:persona`
+ *    section is replaced with this text AND every other section is dropped,
+ *    so the request carries the same clean system prompt as the upstream
+ *    anchored preset (persona section only). After promotion the preset's own
+ *    sections return. NOTE: only takes effect for personas that are NOT
+ *    `complete` — a complete persona is restored by the registry after this
+ *    waterfall and cannot be swapped; for complete personas the sections are
+ *    left untouched (their persona is already the only section the registry
+ *    will keep).
+ *  - `suppressedContextPlugins`: controlled-phase messages whose
+ *    `source.plugin` is listed here are ALSO removed (defaults stamped by the
+ *    generator: the runtime-context snapshot from
+ *    `@deepseek-ai/dsh-system-prompt`).
  *
  * Ordering contract (keep this row FIRST in the composition):
  *  - This plugin deliberately has NO inject list. Registered before
@@ -72,8 +54,12 @@
  *    session.
  *  - The pre-step context filter degrades to "keep everything" on failure:
  *    a filter bug must never eat the user's context.
- *  - Invalid config fails at apply time, i.e. at preset mount.
+ *  - Invalid config — bad tool lists, unknown keys, unknown `promoteOn`,
+ *    malformed suppressed lists, non-positive `bootstrapMaxTokens` — fails at
+ *    apply time, i.e. at preset mount.
  */
+
+import { createEpochPromotion } from './compaction-epoch.mjs'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'anchored-tool-bootstrap'
@@ -91,11 +77,22 @@ const PROMOTE_EVENTS = {
   'tool-call': ['tool/call'],
   'assistant-message': ['assistant/message'],
   either: ['tool/call', 'assistant/message'],
-  // The permanent anchor (issue #16 minimal-turbo): no event ever promotes,
-  // so every top-level request keeps the bootstrap conditions for the whole
-  // session. Subagents still see the full phase via delegationDepthExempt.
-  never: [],
 }
+
+/** Discovery tools always resident after promotion (the tool-search pattern). */
+const RESIDENT_DISCOVERY_TOOLS = ['dev_tool_search', 'skill_search', 'skill_load']
+
+/** Every config key this plugin accepts — anything else is a typo. */
+const ALLOWED_KEYS = new Set([
+  'bootstrapTools',
+  'promoteOn',
+  'bootstrapMaxTokens',
+  'suppressedContextSources',
+  'suppressedContextPlugins',
+  'compactionTools',
+  'delegationDepthExempt',
+  'bootstrapPersonaText',
+])
 
 function stringList(value, field) {
   if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || item.length === 0)) {
@@ -104,10 +101,15 @@ function stringList(value, field) {
   return [...new Set(value)]
 }
 
+function stringListOrEmpty(value, field) {
+  if (value === undefined) return []
+  return stringList(value, field)
+}
+
 function parsePromoteOn(value) {
   if (value === undefined || value === 'either') return PROMOTE_EVENTS.either
-  if (value === 'tool-call' || value === 'assistant-message' || value === 'never') return PROMOTE_EVENTS[value]
-  throw new TypeError(`${name}: promoteOn must be one of "tool-call", "assistant-message", "either", "never"; got ${JSON.stringify(value)}`)
+  if (value === 'tool-call' || value === 'assistant-message') return PROMOTE_EVENTS[value]
+  throw new TypeError(`${name}: promoteOn must be one of "tool-call", "assistant-message", "either"; got ${JSON.stringify(value)}`)
 }
 
 /**
@@ -155,16 +157,32 @@ function optionalString(value, field) {
 
 /** Register the per-session bootstrap filters. */
 export function apply(ctx, config) {
-  const bootstrapTools = stringList(config.bootstrapTools, 'bootstrapTools')
-  const promoteEvents = parsePromoteOn(config.promoteOn)
-  const bootstrapMaxTokens = optionalPositiveInt(config.bootstrapMaxTokens, 'bootstrapMaxTokens')
-  const suppressedSources = sourceList(config.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
-  const suppressedPlugins = sourceList(config.suppressedContextPlugins, 'suppressedContextPlugins', [])
-  const bootstrapPersonaText = optionalString(config.bootstrapPersonaText, 'bootstrapPersonaText')
-  const delegationDepthExempt = optionalBool(config.delegationDepthExempt, 'delegationDepthExempt', true)
+  const source = config === undefined ? {} : config
+  if (typeof source !== 'object' || source === null || Array.isArray(source)) {
+    throw new TypeError(`${name}: config must be an object`)
+  }
+  const unknown = Object.keys(source).filter((key) => !ALLOWED_KEYS.has(key))
+  if (unknown.length > 0) {
+    throw new TypeError(
+      `${name}: unknown config key(s) ${unknown.join(', ')} — allowed keys: ${[...ALLOWED_KEYS].sort().join(', ')}`,
+    )
+  }
 
-  /** Sessions already promoted in this process. Promotion is append-only, so a Set is sound. */
-  const promoted = new Set()
+  const bootstrapTools = stringList(source.bootstrapTools, 'bootstrapTools')
+  const promoteEvents = parsePromoteOn(source.promoteOn)
+  const bootstrapMaxTokens = optionalPositiveInt(source.bootstrapMaxTokens, 'bootstrapMaxTokens')
+  const suppressedSources = sourceList(source.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
+  const suppressedPlugins = sourceList(source.suppressedContextPlugins, 'suppressedContextPlugins', [])
+  // Core work set exposed after a compaction, before re-promotion. Empty
+  // means "no compaction recovery catalog": the session stays on the
+  // bootstrap pair until a new promotion signal.
+  const compactionTools = stringListOrEmpty(source.compactionTools, 'compactionTools')
+  const delegationDepthExempt = optionalBool(source.delegationDepthExempt, 'delegationDepthExempt', true)
+  const bootstrapPersonaText = optionalString(source.bootstrapPersonaText, 'bootstrapPersonaText')
+
+  const promotion = createEpochPromotion(promoteEvents, { includeSubagents: !delegationDepthExempt })
+  ctx.on('session/event', (session, event) => promotion.observe(session, event))
+
   let warned = false
   const warnOnce = (message) => {
     if (warned) return
@@ -177,48 +195,54 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Whether the session has reached the promoted phase.
-   * @param agent - the assembly context's agent, or undefined outside an agent.
+   * Tool names the model explicitly unlocked via `dev_tool_search` for one
+   * session. Derived from durable `tool/call` events so resume/reload keeps
+   * them. The event's `arguments` is the raw JSON string the model produced;
+   * parse it defensively and read the `toolNames` array.
    */
-  const isPromoted = (agent) => {
-    if (agent === undefined) return true
-    const session = agent.session
-    if (session === undefined) return true
-    if (delegationDepthExempt && (session.header.delegationDepth ?? 0) > 0) return true
-    if (promoted.has(session.id)) return true
-    const hit = session.events.some((event) => promoteEvents.includes(event.type))
-    if (hit) promoted.add(session.id)
-    return hit
+  const unlockedFor = (session) => {
+    const unlocked = new Set()
+    if (session === undefined || !Array.isArray(session.events)) return unlocked
+    for (const event of session.events) {
+      if (event.type !== 'tool/call') continue
+      if (event.data?.name !== 'dev_tool_search') continue
+      let args
+      try {
+        args = JSON.parse(event.data.arguments)
+      } catch {
+        continue
+      }
+      if (args === null || typeof args !== 'object' || Array.isArray(args)) continue
+      const names = args.toolNames
+      if (Array.isArray(names)) for (const name of names) if (typeof name === 'string' && name.length > 0) unlocked.add(name)
+    }
+    return unlocked
   }
 
-  /** Narrow the assembled catalog to the pinned bootstrap tool set. */
-  const applyBootstrap = (assembled) => {
+  /** Narrow the assembled catalog to a keep-set; validate required names. */
+  const keepTools = (assembled, keep, missingAllowsFullCatalog) => {
     const available = new Set(assembled.tools.map((tool) => tool.name))
-    const missing = bootstrapTools.filter((toolName) => !available.has(toolName))
+    const missing = [...keep].filter((toolName) => !available.has(toolName))
     if (missing.length > 0) {
       warnOnce(
-        `${name}: expected every bootstrap tool; missing=${JSON.stringify(missing)} — `
-        + 'bootstrap disabled, full catalog exposed',
+        `${name}: expected every phase tool; missing=${JSON.stringify(missing)} — `
+        + (missingAllowsFullCatalog ? 'bootstrap disabled, full catalog exposed' : 'continuing with what is available'),
       )
-      return assembled
+      if (missingAllowsFullCatalog) return assembled
     }
     return {
       ...assembled,
-      tools: assembled.tools.filter((tool) => bootstrapTools.includes(tool.name)),
+      tools: assembled.tools.filter((tool) => keep.has(tool.name)),
     }
   }
 
   /**
    * Reduce the assembled prompt to the clean Minimal system prompt while
-   * bootstrapping: the persona section alone, carrying the bootstrap text,
-   * and no runtime contexts. This mirrors what the official Minimal preset
-   * ships (`complete: true` + `includeRuntimeContext: false`) for presets
-   * whose persona is NOT complete — for those the registry restores the
-   * original sections after this waterfall, so the reduction is skipped
-   * there. "Restore after promotion" is automatic: the swap simply stops
-   * applying once the session promotes.
+   * controlled: the persona section alone, carrying the bootstrap text, and
+   * no runtime contexts. "Restore after promotion" is automatic: the swap
+   * simply stops applying once the session promotes.
    */
-  const applyBootstrapPersona = (assembled) => {
+  const applyBootstrapPrompt = (assembled) => {
     if (bootstrapPersonaText === undefined) return assembled
     const sections = assembled.sections
     if (!Array.isArray(sections)) return assembled
@@ -234,8 +258,20 @@ export function apply(ctx, config) {
     // Downstream errors propagate untouched; only this filter's own logic is guarded.
     const assembled = await next()
     try {
-      if (isPromoted(context.agent)) return assembled
-      return applyBootstrapPersona(applyBootstrap(assembled))
+      const status = promotion.status(context.agent)
+      if (status.promoted) {
+        // PROMOTED: keep the minimal resident set — the bootstrap pair + the
+        // discovery tools + whatever the model explicitly unlocked via
+        // dev_tool_search — instead of dumping the whole catalog at once.
+        const keep = new Set([...bootstrapTools, ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(context.agent?.session)])
+        return keepTools(assembled, keep, false)
+      }
+      // Controlled phase: the bootstrap pair; after a compaction, plus the
+      // compaction work set so mid-task work can continue.
+      const keep = new Set(bootstrapTools)
+      const { boundary } = status
+      if (boundary >= 0) for (const toolName of compactionTools) keep.add(toolName)
+      return applyBootstrapPrompt(keepTools(assembled, keep, true))
     } catch (error) {
       // A filter bug must never brick a session: degrade to the full catalog.
       warnOnce(`${name}: bootstrap filter failed, exposing the full catalog: ${String((error && error.message) || error)}`)
@@ -243,32 +279,23 @@ export function apply(ctx, config) {
     }
   })
 
-  // Optionally cap the FIRST model request's output budget while bootstrapping.
-  // Omitted (`undefined`) means the adapter default flows — the Minimal tool
-  // schema anchors at 256000 without a cap (upstream issue #11). The cap is
-  // "first request only" by design: in two-phase modes promotion already
-  // releases it, and in `never` mode the session never promotes, so a
-  // permanent cap would starve every later response.
+  // Optionally cap the model request's output budget while the session is
+  // controlled. Unset (`bootstrapMaxTokens` omitted) means the adapter default
+  // flows — the Minimal tool schema anchors at 256000 without a cap (upstream
+  // issue #11). After promotion (or after a compaction until re-promotion) the
+  // cap is stripped explicitly, because the next request's seed proposal
+  // carries the previous header's maxTokens forward.
   if (bootstrapMaxTokens !== undefined) {
-    // prepend: true keeps this listener the OUTERMOST transform of the
-    // agent/request waterfall (upstream PR #13), so a later listener can
-    // never override the first-round budget after we set it.
-    const firstRequests = new Set()
     ctx.on('agent/request', async (payload, next) => {
       const resolved = await next()
       const agent = payload.agent
-      const session = agent?.session
-      if (session === undefined || isPromoted(agent) || firstRequests.has(session.id)) {
-        // The next request's seed proposal carries the previous header's
-        // maxTokens forward, so the injected cap must be stripped explicitly —
-        // otherwise it would persist for the whole session.
-        if (session !== undefined && resolved.maxTokens === bootstrapMaxTokens) {
+      if (promotion.status(agent).promoted) {
+        if (resolved.maxTokens === bootstrapMaxTokens) {
           const { maxTokens: _bootstrap, ...rest } = resolved
           return rest
         }
         return resolved
       }
-      firstRequests.add(session.id)
       return {
         ...resolved,
         maxTokens: bootstrapMaxTokens,
@@ -276,15 +303,15 @@ export function apply(ctx, config) {
     }, { prepend: true })
   }
 
-  // Strip auto-injected first-step context during bootstrap. Registered first
-  // (ordering contract) and prepended (upstream parity), this strip is the
-  // final waterfall transform and removes what later listeners inject.
+  // Strip auto-injected context while controlled. Registered first (ordering
+  // contract) and prepended (upstream parity), this strip is the final
+  // waterfall transform and removes what later listeners inject.
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     // Downstream errors propagate untouched; only this filter's own logic is guarded.
     const decision = await next()
     if (decision.kind === 'reject') return decision
     try {
-      if (isPromoted(agent) || (suppressedSources.size === 0 && suppressedPlugins.size === 0)) return decision
+      if (promotion.status(agent).promoted || (suppressedSources.size === 0 && suppressedPlugins.size === 0)) return decision
       if (!Array.isArray(decision.messages)) return decision
       const kept = decision.messages.filter((message) => {
         const source = message?.source
