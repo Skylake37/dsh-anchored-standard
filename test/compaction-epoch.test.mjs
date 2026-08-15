@@ -77,10 +77,17 @@ test('multiple compactions: the LAST boundary wins', () => {
   assert.equal(status.boundary, 4)
 })
 
-test('subagents (delegationDepth > 0) are always promoted', () => {
+test('subagents (delegationDepth > 0) are always promoted by default', () => {
   const promotion = createEpochPromotion(['tool/call'])
   const s = session([], { delegationDepth: 1 })
   assert.equal(promotion.status({ session: s }).promoted, true)
+})
+
+test('subagents follow the normal phase when includeSubagents is true', () => {
+  const promotion = createEpochPromotion(['tool/call'], { includeSubagents: true })
+  const s = session([], { delegationDepth: 1 })
+  assert.equal(promotion.status({ session: s }).promoted, false)
+  assert.equal(promotion.status({ session: s }).boundary, -1)
 })
 
 test('undefined agent or session is always promoted (defensive)', () => {

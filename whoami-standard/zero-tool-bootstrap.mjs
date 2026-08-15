@@ -39,8 +39,9 @@
  * Robustness:
  *  - Promotion decisions are memoized per session id for this process; the
  *    durable event scan runs once per session per process, then O(1).
- *  - Subagents and non-top-level agents always see the full catalog: their
- *    first request must be able to call tools.
+ *  - By default subagents are treated as already promoted so their first
+ *    request can use tools. Set `includeSubagents: true` to make subagents
+ *    follow the same zero-tool anchor phase as top-level sessions.
  *  - A filter failure degrades to the full catalog with a one-time warning,
  *    so a bug can never brick every request of a session.
  */
@@ -89,7 +90,7 @@ export function apply(ctx, config) {
   const compactionTools = stringListOrEmpty(config?.compactionTools, 'compactionTools')
   const suppressedSources = sourceList(config?.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
 
-  const promotion = createEpochPromotion(['assistant/message'])
+  const promotion = createEpochPromotion(['assistant/message'], { includeSubagents: config?.includeSubagents === true })
   ctx.on('session/event', (session, event) => promotion.observe(session, event))
 
   let warned = false

@@ -242,7 +242,9 @@ real message is processed:
 
 The anchor text is configurable via the `whoami-turn` row's `text` option
 (default "你是谁"). Anchoring on the first message — not session creation —
-keeps the blank-session preset switcher usable; subagents always see the full
+keeps the blank-session preset switcher usable. With `includeSubagents: true`,
+subagents inherit the same flow: their first request is the whoami anchor with
+zero tools, and the delegated task runs on the next turn with the resident
 catalog. The trade-off is one extra model call per session: the anchor turn is
 always taken, even when the first message is urgent.
 
