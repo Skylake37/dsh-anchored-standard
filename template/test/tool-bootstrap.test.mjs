@@ -156,6 +156,17 @@ test('an opt-in bootstrapMaxTokens caps request #1 and is released after promoti
   assert.equal(released.maxTokens, undefined)
 })
 
+test('with promoteOn never the cap is released after the FIRST request of the session', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, promoteOn: 'never', bootstrapMaxTokens: 2048 })
+  const first = await request(listeners['agent/request'], [], { provider: 'x', model: 'y' }, {}, 'cap-session')
+  assert.equal(first.maxTokens, 2048)
+  // No promotion events: the second request of the same session must NOT stay capped.
+  const second = await request(listeners['agent/request'], [], { provider: 'x', model: 'y', maxTokens: 2048 }, {}, 'cap-session')
+  assert.equal(second.maxTokens, undefined)
+  const other = await request(listeners['agent/request'], [], { provider: 'x', model: 'y' }, {}, 'other-session')
+  assert.equal(other.maxTokens, 2048)
+})
+
 test('non-array pre-step messages pass through untouched', async () => {
   const { listeners } = register()
   const decision = await prestep(listeners['agent/pre-step'], [], 'not-an-array')
@@ -190,24 +201,29 @@ test('invalid configs fail at apply time', () => {
   assert.throws(() => register({ ...EXACT_CONFIG, delegationDepthExempt: 'yes' }), /delegationDepthExempt/)
 })
 
-test('bootstrapPersonaText swaps the persona section only while bootstrapping', async () => {
+test('bootstrapPersonaText reduces the prompt to the sole Minimal persona section while bootstrapping', async () => {
   const MINIMAL_LINE = 'You are a helpful software engineer assistant.'
   const { listeners } = register({ ...EXACT_CONFIG, bootstrapPersonaText: MINIMAL_LINE })
   const assembly = {
     system: 'x',
     sections: [
-      { name: 'deployment:identity', text: 'harness identity' },
+      { name: 'harness:identity', text: 'harness identity' },
       { name: 'deployment:persona', text: 'You are a coding agent powered by deepseek-v4-pro...' },
       { name: 'tool:cordis', text: 'dynamic plugin guidance' },
     ],
+    contexts: [{ name: 'sandbox:policy', text: 'file policy' }],
     tools: [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }],
   }
   const bootstrapped = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p1') }, async () => assembly)
-  assert.equal(bootstrapped.sections.find(section => section.name === 'deployment:persona').text, MINIMAL_LINE)
-  assert.equal(bootstrapped.sections.find(section => section.name === 'tool:cordis').text, 'dynamic plugin guidance')
+  // The clean Minimal prompt: the persona section alone (harness identity,
+  // orientation, and tool guidance are dropped), no runtime contexts, and the
+  // bootstrap tool pair only.
+  assert.deepEqual(bootstrapped.sections, [{ name: 'deployment:persona', text: MINIMAL_LINE }])
+  assert.deepEqual(bootstrapped.contexts, [])
   assert.deepEqual(bootstrapped.tools.map(tool => tool.name), ['pwsh', 'read'])
   const promoted = await listeners['system-prompt/assemble'](undefined, { agent: agent([{ type: 'tool/call' }], {}, 'p1') }, async () => assembly)
-  assert.equal(promoted.sections.find(section => section.name === 'deployment:persona').text, 'You are a coding agent powered by deepseek-v4-pro...')
+  assert.deepEqual(promoted.sections, assembly.sections)
+  assert.deepEqual(promoted.contexts, assembly.contexts)
   assert.deepEqual(promoted.tools.map(tool => tool.name), ['pwsh', 'read', 'write'])
 })
 
@@ -215,7 +231,40 @@ test('bootstrapPersonaText is a graceful no-op when no persona section exists', 
   const { listeners } = register({ ...EXACT_CONFIG, bootstrapPersonaText: 'minimal' })
   const assembly = { sections: [{ name: 'tool:cordis', text: 'x' }], tools: [{ name: 'pwsh' }, { name: 'read' }] }
   const result = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p2') }, async () => assembly)
+  assert.deepEqual(result.sections, assembly.sections)
   assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+})
+
+test('promoteOn never keeps the bootstrap conditions for the WHOLE session', async () => {
+  const MINIMAL_LINE = 'You are a helpful software engineer assistant.'
+  const { listeners } = register({ ...EXACT_CONFIG, promoteOn: 'never', bootstrapPersonaText: MINIMAL_LINE })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const assembly = {
+    sections: [{ name: 'harness:identity', text: 'id' }, { name: 'deployment:persona', text: 'full persona' }],
+    contexts: [{ name: 'x', text: 'y' }],
+    tools,
+  }
+  // Durable events that would promote in every other mode must NOT promote here.
+  for (const events of [[], [{ type: 'tool/call' }], [{ type: 'assistant/message' }], [{ type: 'tool/call' }, { type: 'assistant/message' }]]) {
+    const result = await listeners['system-prompt/assemble'](undefined, { agent: agent(events, {}, 'never-session') }, async () => assembly)
+    assert.deepEqual(result.sections, [{ name: 'deployment:persona', text: MINIMAL_LINE }])
+    assert.deepEqual(result.contexts, [])
+    assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+  }
+  // The pre-step context strip also never promotes away.
+  const messages = [
+    { id: 'user', content: [] },
+    { id: 'skills', content: [], source: { kind: 'skill-catalog' } },
+  ]
+  const decision = await prestep(listeners['agent/pre-step'], [{ type: 'tool/call' }, { type: 'assistant/message' }], messages)
+  assert.deepEqual(decision.messages.map(message => message.id), ['user'])
+})
+
+test('promoteOn never still exempts subagents by default', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, promoteOn: 'never' })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools, { delegationDepth: 1 })
+  assert.deepEqual(result.tools, tools)
 })
 
 test('suppressedContextPlugins strips those plugins while bootstrapping and restores after promotion', async () => {

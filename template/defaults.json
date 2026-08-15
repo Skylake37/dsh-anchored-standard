@@ -1,5 +1,5 @@
 {
-  "promoteOn": "either",
+  "promoteOn": "never",
   "delegationDepthExempt": true,
   "suppressedContextSources": ["agent-instructions", "skill-catalog"],
   "suppressedContextPlugins": ["@deepseek-ai/dsh-system-prompt"],

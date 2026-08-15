@@ -3,24 +3,38 @@
  * register it as the FIRST row of the preset's agent.cordis.yml.
  *
  * Behavior per session:
- *  - Request #1 sees the pinned bootstrap tool surface (default upstream
- *    finding: the official Minimal preset's real pair — persistent `bash` +
- *    `str_replace_editor`) and no auto-injected workspace/skill context.
- *  - After the session records its first durable promotion signal (default:
- *    the first `tool/call` OR the first `assistant/message`, whichever comes
- *    first), every later request sees the preset's own full catalog and the
- *    normal context injections again.
+ *  - While a session is in its bootstrap phase, every model request sees the
+ *    pinned bootstrap tool surface (default upstream finding: the official
+ *    Minimal preset's real pair — persistent `bash` + `str_replace_editor`),
+ *    the CLEAN Minimal system prompt (only the persona section with
+ *    `bootstrapPersonaText`; the harness identity, orientation, tool
+ *    guidance, and runtime-context sections are dropped, mirroring the
+ *    Minimal preset's `complete` persona), and no auto-injected
+ *    workspace/skill context.
+ *  - Two-phase modes (`either`, `tool-call`, `assistant-message`): after the
+ *    session records its first durable promotion signal, every later request
+ *    sees the preset's own full catalog, full persona, and the normal
+ *    context injections again. Upstream issues #17/#18 measured that the
+ *    promoted rounds fall back to the standard "Let me" trajectory.
+ *  - `never` (the downstream default): the bootstrap phase lasts for the
+ *    WHOLE session — every top-level request keeps the Minimal tool pair,
+ *    the clean Minimal system prompt, and the context strip, so every
+ *    reasoning chain stays on the "We need" trajectory (the issue #16
+ *    minimal-turbo finding). Subagents still see the full phase by default
+ *    (`delegationDepthExempt`).
  *  - The phase is derived from durable session events, so resume and reload
  *    preserve it; promotion decisions are memoized per session id per process.
  *
  * Config (all values come from the row that mounts this file):
- *  - `bootstrapTools: string[]` — required exact first-request tool list.
- *  - `promoteOn: either | tool-call | assistant-message` (default `either`).
- *  - `bootstrapMaxTokens: positive int` — OPT-IN first-request output cap.
+ *  - `bootstrapTools: string[]` — required exact bootstrap tool list.
+ *  - `promoteOn: either | tool-call | assistant-message | never`
+ *    (default `either`; the downstream generator defaults to `never`).
+ *  - `bootstrapMaxTokens: positive int` — OPT-IN FIRST-REQUEST output cap.
  *    Omit it to let the adapter default flow: the Minimal tool schema anchors
  *    at the adapter-default maxTokens without a cap (upstream issue #11).
- *    When set, the cap is registered with `prepend` and stripped after
- *    promotion.
+ *    When set, only the first request of a session is capped and the cap is
+ *    stripped afterwards (in `never` mode there is no promotion, so the
+ *    "first request only" rule is what keeps the cap from persisting).
  *  - `suppressedContextSources: string[]` (default `skill-catalog`,
  *    `agent-instructions`) — first-step message kinds removed while
  *    bootstrapping. An explicitly empty array disables the context filter
@@ -32,12 +46,14 @@
  *    snapshot from `@deepseek-ai/dsh-system-prompt`). Restored from request
  *    #2 on.
  *  - `bootstrapPersonaText: string` (default unset) — while bootstrapping,
- *    the `deployment:persona` section is replaced with this text; after
- *    promotion the preset's own persona returns. Stamped by the generator
- *    as the Minimal persona line so request #1 carries the same system
- *    prompt as the upstream anchored preset. NOTE: only takes effect for
+ *    the `deployment:persona` section is replaced with this text AND every
+ *    other section is dropped, so the request carries the same clean system
+ *    prompt as the upstream anchored preset (persona section only). After
+ *    promotion the preset's own sections return. NOTE: only takes effect for
  *    personas that are NOT `complete` — a complete persona is restored by
- *    the registry after this waterfall and cannot be swapped.
+ *    the registry after this waterfall and cannot be swapped; for complete
+ *    personas the sections are left untouched (their persona is already the
+ *    only section the registry will keep).
  *  - `delegationDepthExempt: boolean` (default true) — subagents always see
  *    the full catalog; set false to bootstrap child sessions too.
  *
@@ -75,6 +91,10 @@ const PROMOTE_EVENTS = {
   'tool-call': ['tool/call'],
   'assistant-message': ['assistant/message'],
   either: ['tool/call', 'assistant/message'],
+  // The permanent anchor (issue #16 minimal-turbo): no event ever promotes,
+  // so every top-level request keeps the bootstrap conditions for the whole
+  // session. Subagents still see the full phase via delegationDepthExempt.
+  never: [],
 }
 
 function stringList(value, field) {
@@ -86,8 +106,8 @@ function stringList(value, field) {
 
 function parsePromoteOn(value) {
   if (value === undefined || value === 'either') return PROMOTE_EVENTS.either
-  if (value === 'tool-call' || value === 'assistant-message') return PROMOTE_EVENTS[value]
-  throw new TypeError(`${name}: promoteOn must be one of "tool-call", "assistant-message", "either"; got ${JSON.stringify(value)}`)
+  if (value === 'tool-call' || value === 'assistant-message' || value === 'never') return PROMOTE_EVENTS[value]
+  throw new TypeError(`${name}: promoteOn must be one of "tool-call", "assistant-message", "either", "never"; got ${JSON.stringify(value)}`)
 }
 
 /**
@@ -189,18 +209,25 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Swap the persona section to the bootstrap persona while unpromoted, so
-   * request #1 carries the same system prompt as the upstream anchored
-   * preset. The registry reassembles every request from its own sections, so
-   * "restore after promotion" is automatic: the swap simply stops applying.
+   * Reduce the assembled prompt to the clean Minimal system prompt while
+   * bootstrapping: the persona section alone, carrying the bootstrap text,
+   * and no runtime contexts. This mirrors what the official Minimal preset
+   * ships (`complete: true` + `includeRuntimeContext: false`) for presets
+   * whose persona is NOT complete — for those the registry restores the
+   * original sections after this waterfall, so the reduction is skipped
+   * there. "Restore after promotion" is automatic: the swap simply stops
+   * applying once the session promotes.
    */
   const applyBootstrapPersona = (assembled) => {
     if (bootstrapPersonaText === undefined) return assembled
-    const index = assembled.sections.findIndex((section) => section.name === PERSONA_SECTION)
-    if (index === -1 || assembled.sections[index].text === bootstrapPersonaText) return assembled
-    const sections = assembled.sections.slice()
-    sections[index] = { ...sections[index], text: bootstrapPersonaText }
-    return { ...assembled, sections }
+    const sections = assembled.sections
+    if (!Array.isArray(sections)) return assembled
+    const index = sections.findIndex((section) => section.name === PERSONA_SECTION)
+    if (index === -1) return assembled
+    const persona = { ...sections[index], text: bootstrapPersonaText }
+    const next = { ...assembled, sections: [persona] }
+    if (Array.isArray(assembled.contexts) && assembled.contexts.length > 0) next.contexts = []
+    return next
   }
 
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
@@ -216,26 +243,32 @@ export function apply(ctx, config) {
     }
   })
 
-  // Optionally cap the first model request's output budget while bootstrapping.
+  // Optionally cap the FIRST model request's output budget while bootstrapping.
   // Omitted (`undefined`) means the adapter default flows — the Minimal tool
-  // schema anchors at 256000 without a cap (upstream issue #11).
+  // schema anchors at 256000 without a cap (upstream issue #11). The cap is
+  // "first request only" by design: in two-phase modes promotion already
+  // releases it, and in `never` mode the session never promotes, so a
+  // permanent cap would starve every later response.
   if (bootstrapMaxTokens !== undefined) {
     // prepend: true keeps this listener the OUTERMOST transform of the
     // agent/request waterfall (upstream PR #13), so a later listener can
     // never override the first-round budget after we set it.
+    const firstRequests = new Set()
     ctx.on('agent/request', async (payload, next) => {
       const resolved = await next()
       const agent = payload.agent
-      if (isPromoted(agent)) {
+      const session = agent?.session
+      if (session === undefined || isPromoted(agent) || firstRequests.has(session.id)) {
         // The next request's seed proposal carries the previous header's
         // maxTokens forward, so the injected cap must be stripped explicitly —
         // otherwise it would persist for the whole session.
-        if (resolved.maxTokens === bootstrapMaxTokens) {
+        if (session !== undefined && resolved.maxTokens === bootstrapMaxTokens) {
           const { maxTokens: _bootstrap, ...rest } = resolved
           return rest
         }
         return resolved
       }
+      firstRequests.add(session.id)
       return {
         ...resolved,
         maxTokens: bootstrapMaxTokens,

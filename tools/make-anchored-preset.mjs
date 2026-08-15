@@ -61,7 +61,7 @@ export const SYSTEM_PROMPT_PLUGIN = '@deepseek-ai/dsh-system-prompt'
 /** Same id grammar the harness roster enforces. */
 const PRESET_ID = /^[a-z0-9][a-z0-9-]*$/
 
-const PROMOTE_ON_VALUES = new Set(['either', 'tool-call', 'assistant-message'])
+const PROMOTE_ON_VALUES = new Set(['either', 'tool-call', 'assistant-message', 'never'])
 
 const PKG_TOOL_BASH = '@deepseek-ai/dsh-tool-bash'
 const PKG_TOOL_PWSH = '@deepseek-ai/dsh-tool-pwsh'
@@ -338,21 +338,59 @@ export function stampMinimalToolRows(composition, bootstrapTools) {
 /**
  * Patch the deployed @deepseek-ai/dsh-tool-cordis bundle into the guarded
  * variant: identical tools, but the process-global Inspect provider
- * registration is skipped (the providers are shared) when another
- * cordis-family preset already owns them, so a stamped copy can mount in the
- * same DSH process as its source preset. The guard matches on the exact
- * deployed markers and throws on any other shape instead of guessing.
+ * registration is shared instead of exclusive. Two layers:
+ *
+ *  1. The guarded loop catches "already registered" on ITS OWN registration,
+ *     so a stamped copy can mount after its source preset.
+ *  2. A tolerant wrapper is installed on the SHARED registry's `register`
+ *     once per process, so a duplicate registration from ANY later
+ *     cordis-family mount (e.g. the original preset mounting after this
+ *     copy — the reverse order that used to brick old sessions) becomes a
+ *     no-op share instead of throwing. Without it, resuming an old native
+ *     cordis session in the same process fails the whole preset mount
+ *     ("preset \"cordis\" failed to mount … already registered"), which
+ *     breaks that session's UI (including the model selector).
+ *
+ * The guard matches on the exact deployed markers and throws on any other
+ * shape instead of guessing.
  */
 export function patchGuardedBundle(text) {
   const NAME_MARKER = 'const name = "tool-cordis";'
+  const APPLY_MARKER = '/** Register the Cordis tools and explicit `@pluginId` context injection. */\nfunction apply(ctx) {'
   const REGISTER_MARKER = '\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => ctx.cordisInspect.register(provider), `tool-cordis: inspect ${provider.manifest.id}`);'
   if (!text.includes(NAME_MARKER)) {
     throw new Error(`guarded bundle patch: plugin name marker not found — unexpected ${PKG_TOOL_CORDIS} bundle shape`)
   }
+  if (!text.includes(APPLY_MARKER)) {
+    throw new Error('guarded bundle patch: apply-function marker not found — unexpected bundle shape')
+  }
   if (!text.includes(REGISTER_MARKER)) {
     throw new Error('guarded bundle patch: registration loop marker not found — unexpected bundle shape')
   }
+  const registryGuard = [
+    '/** Make the shared Inspect registry tolerant of duplicate registrations for the whole process, so the ORIGINAL cordis preset can mount after this guarded copy (reverse order no longer bricks old sessions). */',
+    'function installSharedRegisterGuard(ctx) {',
+    '\tconst registry = ctx.cordisInspect;',
+    '\tif (registry === void 0 || typeof registry.register !== "function") return;',
+    '\tconst flag = Symbol.for("dsh.anchored.shared-cordis-inspect-register");',
+    '\tconst original = registry.register;',
+    '\tif (original[flag] === true) return;',
+    '\tconst tolerant = function sharedRegister(registration) {',
+    '\t\ttry {',
+    '\t\t\treturn original.call(registry, registration);',
+    '\t\t} catch (error) {',
+    '\t\t\tconst message = String((error && error.message) || error);',
+    '\t\t\tif (!message.includes("already registered")) throw error;',
+    '\t\t\ttry { ctx.logger.warn("tool-cordis-guarded: inspect provider already registered by another cordis-family mount; sharing it (register made tolerant)"); } catch { /* logger unavailable */ }',
+    '\t\t\treturn function sharedNoopDisposer() {};',
+    '\t\t}',
+    '\t};',
+    '\ttolerant[flag] = true;',
+    '\tregistry.register = tolerant;',
+    '}',
+  ].join('\n')
   const guardedLoop = [
+    '\tinstallSharedRegisterGuard(ctx);',
     '\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => {',
     '\t\ttry {',
     '\t\t\tctx.cordisInspect.register(provider);',
@@ -365,6 +403,7 @@ export function patchGuardedBundle(text) {
   ].join('\n')
   return text
     .replace(NAME_MARKER, 'const name = "tool-cordis-guarded";')
+    .replace(APPLY_MARKER, `${registryGuard}\n\n${APPLY_MARKER}`)
     .replace(REGISTER_MARKER, guardedLoop)
 }
 
@@ -587,7 +626,9 @@ export async function generateAnchoredPreset(options) {
   })
   const name = options.name ?? `${sourceName} Anchored (experimental)`
   const description = options.description
-    ?? `Anchored copy of ${source.id}: request #1 on ${describeFilter(bootstrapTools)}, then the full ${source.id} catalog.`
+    ?? (resolved.promoteOn === 'never'
+      ? `Anchored copy of ${source.id}: EVERY request keeps the Minimal persona and the bootstrap catalog (${describeFilter(bootstrapTools)}) with auto-injected context stripped, so all reasoning chains stay on the "We need" trajectory (upstream issue #16); subagents see the full catalog.`
+      : `Anchored copy of ${source.id}: request #1 on ${describeFilter(bootstrapTools)}, then the full ${source.id} catalog.`)
   const plan = {
     sourceId: source.id,
     sourceDir: source.dir,
@@ -692,8 +733,9 @@ Options:
                             (falls back to ~/.dsh/.agent-presets).
   --source-root <dir>       Extra search root for shipped presets, e.g. the
                             harness install's apps/cli/config/agent-presets.
-  --bootstrap-tools <a,b>   Exact first-request tool list. Default: the Minimal
-                            pair bash,str_replace_editor (upstream PR #14); the
+  --bootstrap-tools <a,b>   Exact bootstrap tool list (the only tools while
+                            bootstrapping). Default: the Minimal pair
+                            bash,str_replace_editor (upstream PR #14); the
                             generator stamps the Minimal tool groups when the
                             source preset lacks them.
   --guard-cordis-tools <path>
@@ -701,9 +743,19 @@ Options:
                             the target. REQUIRED when the source mounts
                             tool-cordis: the guarded variant shares the
                             process-global Inspect providers instead of
-                            re-registering, so the copy can mount alongside
-                            the source preset in the same DSH process.
-  --promote-on <mode>       either | tool-call | assistant-message.
+                            re-registering, and makes the shared registry's
+                            register tolerant of duplicates, so the copy and
+                            the source preset mount in the same DSH process
+                            in EITHER order (old native cordis sessions keep
+                            working — their preset mount no longer fails).
+  --promote-on <mode>       either | tool-call | assistant-message | never.
+                            Default: never — the bootstrap phase lasts the
+                            whole session, so EVERY reasoning chain keeps the
+                            "We need" trajectory (upstream issue #16
+                            minimal-turbo). Use either to restore the
+                            two-phase upstream behavior (full catalog from
+                            request #2, where later rounds fall back to the
+                            standard "Let me" style — upstream issues #17/#18).
   --max-tokens <n>          OPT-IN first-request maxTokens cap. Omit to run at
                             the adapter default (upstream issue #11).
   --order <n>               Preset order. Default: 5.

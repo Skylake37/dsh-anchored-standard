@@ -56,8 +56,11 @@ const CORDIS_COMPOSITION = `${STANDARD_COMPOSITION}
   name: '@deepseek-ai/dsh-tool-cordis'
 `
 
-/** The two exact markers the guard patch matches in the deployed bundle. */
-const CORDIS_BUNDLE = 'const name = "tool-cordis";\n\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => ctx.cordisInspect.register(provider), `tool-cordis: inspect ${provider.manifest.id}`);\n'
+/** The three exact markers the guard patch matches in the deployed bundle. */
+const CORDIS_BUNDLE = 'const name = "tool-cordis";\n'
+  + '/** Register the Cordis tools and explicit `@pluginId` context injection. */\n'
+  + 'function apply(ctx) {\n'
+  + '\tfor (const provider of hostInspectProviders(ctx)) ctx.effect(() => ctx.cordisInspect.register(provider), `tool-cordis: inspect ${provider.manifest.id}`);\n'
 
 const META = `name: 标准模式
 description: 功能完整。
@@ -73,7 +76,7 @@ async function fixturePreset(parent, id, composition = STANDARD_COMPOSITION) {
 }
 
 const TEMPLATE_DEFAULTS = {
-  promoteOn: 'either',
+  promoteOn: 'never',
   delegationDepthExempt: true,
   suppressedContextSources: ['agent-instructions', 'skill-catalog'],
   suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'],
@@ -116,7 +119,7 @@ test('stampMinimalToolRows is a no-op for a composition already mounting the pai
 test('buildBootstrapRow pins tools and omits the cap unless asked', () => {
   const uncapped = buildBootstrapRow(MINIMAL_BOOTSTRAP_TOOLS, TEMPLATE_DEFAULTS)
   assert.match(uncapped, /bootstrapTools: \["bash", "str_replace_editor"\]/)
-  assert.match(uncapped, /promoteOn: either/)
+  assert.match(uncapped, /promoteOn: never/)
   assert.match(uncapped, /suppressedContextSources: \["agent-instructions", "skill-catalog"\]/)
   assert.match(uncapped, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
   assert.match(uncapped, /bootstrapPersonaText: "You are a helpful software engineer assistant\."/)
@@ -151,9 +154,9 @@ test('patchPresetMeta replaces known fields in place and appends missing ones', 
   assert.equal(readMetaField(patched, 'name'), '标准模式 Anchored (experimental)')
 })
 
-test('loadTemplateDefaults reads the PR14 defaults and carries no maxTokens default', async () => {
+test('loadTemplateDefaults reads the permanent-anchor defaults and carries no maxTokens default', async () => {
   const defaults = await loadTemplateDefaults()
-  assert.equal(defaults.promoteOn, 'either')
+  assert.equal(defaults.promoteOn, 'never')
   assert.equal(defaults.delegationDepthExempt, true)
   assert.deepEqual(defaults.suppressedContextSources, ['agent-instructions', 'skill-catalog'])
   assert.deepEqual(defaults.suppressedContextPlugins, ['@deepseek-ai/dsh-system-prompt'])
@@ -262,12 +265,20 @@ test('parseArgs maps CLI options and rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--from']), /requires a value/)
 })
 
-test('patchGuardedBundle guards the registration and renames the plugin', () => {
+test('patchGuardedBundle guards the registration, tolerates duplicates on the shared registry, and renames the plugin', () => {
   const patched = patchGuardedBundle(CORDIS_BUNDLE)
   assert.match(patched, /const name = "tool-cordis-guarded";/)
   assert.match(patched, /already registered/)
+  assert.match(patched, /installSharedRegisterGuard\(ctx\);/)
+  assert.match(patched, /function installSharedRegisterGuard\(ctx\)/)
+  assert.match(patched, /registry\.register = tolerant;/)
+  assert.match(patched, /sharedNoopDisposer/)
   assert.doesNotMatch(patched, /const name = "tool-cordis";/)
-  assert.throws(() => patchGuardedBundle('const name = "tool-cordis";'), /registration loop marker/)
+  assert.throws(() => patchGuardedBundle('const name = "tool-cordis";'), /apply-function marker/)
+  assert.throws(
+    () => patchGuardedBundle('const name = "tool-cordis";\n/** Register the Cordis tools and explicit `@pluginId` context injection. */\nfunction apply(ctx) {'),
+    /registration loop marker/,
+  )
   assert.throws(() => patchGuardedBundle('no markers at all'), /plugin name marker/)
 })
 
