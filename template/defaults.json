@@ -1,0 +1,6 @@
+{
+  "promoteOn": "either",
+  "bootstrapMaxTokens": 1024,
+  "delegationDepthExempt": true,
+  "suppressedContextSources": ["skill-catalog", "agent-instructions"]
+}

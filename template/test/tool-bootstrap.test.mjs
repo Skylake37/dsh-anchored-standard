@@ -1,0 +1,191 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { apply, inject, name } from '../hook/tool-bootstrap.mjs'
+
+const EXACT_CONFIG = {
+  bootstrapTools: ['bash', 'read'],
+}
+
+function register(config = EXACT_CONFIG) {
+  const listeners = {}
+  const options = {}
+  const warns = []
+  const ctx = {
+    on(event, callback, registerOptions) {
+      listeners[event] = callback
+      options[event] = registerOptions ?? null
+    },
+    logger: {
+      warn(message) {
+        warns.push(message)
+      },
+    },
+  }
+  apply(ctx, config)
+  return { listeners, options, warns }
+}
+
+const agent = (events, header = {}, id = 's') => ({ session: { id, events, header } })
+
+function assemble(listener, events, tools, header = {}, id = 's') {
+  return listener(undefined, { agent: agent(events, header, id) }, async () => ({ system: 'minimal persona', tools }))
+}
+
+function request(listener, events, resolved, header = {}, id = 's') {
+  return listener({ agent: agent(events, header, id), turn: 1, step: 1 }, async () => resolved)
+}
+
+function prestep(listener, events, messages, header = {}, id = 's') {
+  return listener({ agent: agent(events, header, id), turn: 1, step: 1 }, async () => ({ kind: 'enter', messages }))
+}
+
+test('exports a diagnostic plugin name and an empty inject list', () => {
+  assert.equal(name, 'anchored-tool-bootstrap')
+  assert.deepEqual(inject, [])
+})
+
+test('exact bootstrapTools pins the first request to exactly that list', async () => {
+  const { listeners } = register({ bootstrapTools: ['pwsh', 'read'] })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools)
+  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+  assert.equal(result.system, 'minimal persona')
+})
+
+test('exact bootstrapTools preserves the assembled catalog order', async () => {
+  const { listeners } = register({ bootstrapTools: ['edit', 'pwsh'] })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools)
+  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'edit'])
+})
+
+test('a missing exact bootstrap tool degrades to the full catalog with a warning', async () => {
+  const { listeners, warns } = register({ bootstrapTools: ['bash', 'missing'] })
+  const tools = [{ name: 'bash' }, { name: 'read' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools)
+  assert.deepEqual(result.tools, tools)
+  assert.ok(warns.length >= 1)
+})
+
+test('legacy shellTools+commonTools mode still works', async () => {
+  const { listeners } = register({ shellTools: ['bash', 'pwsh'], commonTools: ['read'] })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools)
+  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+})
+
+test('a durable tool call promotes the complete catalog', async () => {
+  const { listeners } = register()
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'edit' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [{ type: 'tool/call' }], tools)
+  assert.deepEqual(result.tools, tools)
+})
+
+test('a first assistant message promotes the complete catalog (either default)', async () => {
+  const { listeners } = register()
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [{ type: 'assistant/message' }], tools)
+  assert.deepEqual(result.tools, tools)
+})
+
+test('promoteOn tool-call requires a tool call, not just a reply', async () => {
+  const { listeners } = register({ bootstrapTools: ['pwsh', 'read'], promoteOn: 'tool-call' })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const replyOnly = await assemble(listeners['system-prompt/assemble'], [{ type: 'assistant/message' }], tools, {}, 'a')
+  assert.deepEqual(replyOnly.tools.map(tool => tool.name), ['pwsh', 'read'])
+  const withCall = await assemble(listeners['system-prompt/assemble'], [{ type: 'tool/call' }], tools, {}, 'b')
+  assert.deepEqual(withCall.tools, tools)
+})
+
+test('subagents see the full catalog by default', async () => {
+  const { listeners } = register()
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools, { delegationDepth: 1 })
+  assert.deepEqual(result.tools, tools)
+})
+
+test('delegationDepthExempt false bootstraps subagents too', async () => {
+  const { listeners } = register({ bootstrapTools: ['pwsh', 'read'], delegationDepthExempt: false })
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const result = await assemble(listeners['system-prompt/assemble'], [], tools, { delegationDepth: 1 })
+  assert.deepEqual(result.tools.map(tool => tool.name), ['pwsh', 'read'])
+})
+
+test('default suppressedContextSources strips skill-catalog and agent-instructions only', async () => {
+  const { listeners } = register()
+  const messages = [
+    { id: 'user', content: [{ type: 'text', text: 'user message' }] },
+    { id: 'skills', content: [], source: { kind: 'skill-catalog' } },
+    { id: 'agents', content: [], source: { kind: 'agent-instructions' } },
+    { id: 'gesture', content: [], source: { kind: 'skill-invocation' } },
+  ]
+  const decision = await prestep(listeners['agent/pre-step'], [], messages)
+  assert.deepEqual(decision.messages.map(message => message.id), ['user', 'gesture'])
+})
+
+test('explicit empty suppressedContextSources disables the context filter', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, suppressedContextSources: [] })
+  const messages = [
+    { id: 'user', content: [] },
+    { id: 'skills', content: [], source: { kind: 'skill-catalog' } },
+  ]
+  const decision = await prestep(listeners['agent/pre-step'], [], messages)
+  assert.deepEqual(decision.messages.map(message => message.id), ['user', 'skills'])
+})
+
+test('suppressedContextSources is configurable per preset', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, suppressedContextSources: ['custom-inject'] })
+  const messages = [
+    { id: 'keep', content: [], source: { kind: 'skill-catalog' } },
+    { id: 'strip', content: [], source: { kind: 'custom-inject' } },
+  ]
+  const decision = await prestep(listeners['agent/pre-step'], [], messages)
+  assert.deepEqual(decision.messages.map(message => message.id), ['keep'])
+})
+
+test('the pre-step listener registers with prepend true (upstream parity)', () => {
+  const { options } = register()
+  assert.deepEqual(options['agent/pre-step'], { prepend: true })
+})
+
+test('non-array pre-step messages pass through untouched', async () => {
+  const { listeners } = register()
+  const decision = await prestep(listeners['agent/pre-step'], [], 'not-an-array')
+  assert.equal(decision.kind, 'enter')
+  assert.equal(decision.messages, 'not-an-array')
+})
+
+test('reject decisions pass through untouched', async () => {
+  const { listeners } = register()
+  const decision = await listeners['agent/pre-step']({ agent: agent([]), turn: 1, step: 1 }, async () => ({ kind: 'reject' }))
+  assert.equal(decision.kind, 'reject')
+})
+
+test('first request is capped to bootstrapMaxTokens and the cap is released after promotion', async () => {
+  const { listeners } = register({ ...EXACT_CONFIG, bootstrapMaxTokens: 2048 })
+  const capped = await request(listeners['agent/request'], [], { provider: 'x', model: 'y' })
+  assert.equal(capped.maxTokens, 2048)
+  const released = await request(listeners['agent/request'], [{ type: 'tool/call' }], { provider: 'x', model: 'y', maxTokens: 2048 })
+  assert.equal(released.maxTokens, undefined)
+})
+
+test('promotion is memoized per session id within one process', async () => {
+  const { listeners } = register()
+  const tools = [{ name: 'pwsh' }, { name: 'read' }, { name: 'write' }]
+  const promoted = await assemble(listeners['system-prompt/assemble'], [{ type: 'tool/call' }], tools, {}, 'memo')
+  assert.deepEqual(promoted.tools, tools)
+  const again = await assemble(listeners['system-prompt/assemble'], [], tools, {}, 'memo')
+  assert.deepEqual(again.tools, tools)
+})
+
+test('invalid configs fail at apply time', () => {
+  assert.throws(() => register({}), /bootstrapTools/)
+  assert.throws(() => register({ shellTools: ['bash'] }), /provided together/)
+  assert.throws(() => register({ ...EXACT_CONFIG, shellTools: ['bash'], commonTools: ['read'] }), /not both/)
+  assert.throws(() => register({ ...EXACT_CONFIG, bootstrapTools: [] }), /bootstrapTools/)
+  assert.throws(() => register({ ...EXACT_CONFIG, suppressedContextSources: [''] }), /suppressedContextSources/)
+  assert.throws(() => register({ ...EXACT_CONFIG, promoteOn: 'bogus' }), /promoteOn/)
+  assert.throws(() => register({ ...EXACT_CONFIG, bootstrapMaxTokens: 0 }), /bootstrapMaxTokens/)
+  assert.throws(() => register({ ...EXACT_CONFIG, delegationDepthExempt: 'yes' }), /delegationDepthExempt/)
+})
