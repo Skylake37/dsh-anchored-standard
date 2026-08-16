@@ -145,43 +145,42 @@ profile 暴露。
 `anchor-bootstrap` 配置 + 伴生 hooks”；`--mode zero` / `--mode whoami`
 为 profile 别名。
 
-## 5. persona 阶段拆分（用户已选 A，建议细化为 A'）
+## 5. persona 最终决定：间接引导，不写 reasoning 风格指令
 
-当前完整 `bootstrapPersonaText` 实际包含四段：
+**Voice ≠ chain。** 模型可以把每句 reasoning 都写成 "We …"，但走的仍可能是
+standard 轨迹；反过来也成立。显式指令 `always open your reasoning with We
+need` 属于表面 voice 引导，不能作为轨迹选择手段，用户已明确要求去掉。
 
-1. **base**：`You are a helpful software engineer assistant.`
-2. **opener**：`When working on a task, always open your reasoning with We need.`
-3. **unlock 指引**：找不到工具先 `dev_tool_search` 列出并解锁。
-4. **工具偏好**：动 bash / str_replace_editor 前先查专用工具并优先使用。
+最终 persona 策略（已实施）：
 
-用户选择 A 的动机是：anchor turn（`empty` 工具面）上第 3、4 段引用
-`dev_tool_search`，而该请求根本没有这个工具，形成悬空指引。建议 A 细化为
-**阶段感知 persona**：
+- system persona 全程保持 **Minimal 原句**：`You are a helpful software
+  engineer assistant.`（46 字符，间接锚定，与上游一致）；
+- 轨迹由**条件**间接选择：干净 persona + 首请求工具面（minimal pair 或
+  empty）+ 无自动注入 context；不看首行措辞，看整条链的行为分布
+  （`session-metrics.mjs` 按工具数分桶统计 we/we-need/let's/let-me）；
+- 工具解锁/专用工具偏好句**不进 persona**，改由 `instruction-hint.mjs` 在
+  晋升后以 user 消息一次性注入（恢复用户要求找回的“督促 tool 使用”内容）。
 
-- anchor turn / 受控期：`base + opener`（保住 We-need 轨迹，但不提工具解锁）；
-- promoted 后：`base + opener + unlock指引 + 工具偏好`（当前完整 persona）。
+历史教训（已实测 A/B）：
 
-这样既消除悬空，也符合“整个链条都是 We need / We have / We ……”的实测目标。
-后续真机验证时，`anchored` 的首请求同样可以先按“受控期只有 base+opener”跑
-一版对比（当前是 full persona），看哪个更稳。
+- persona 带 opener + 工具句（长 persona）→ 晋升后链漂到 Let me；
+- persona 只有 opener（短）→ 链基本 We 系，但偶尔 Let me 且工具引导弱；
+- persona 只有 Minimal 原句 + 晋升后 user 消息注入工具引导 → 待真机复测。
 
 ### 安装态更新（用户已确认）
 
-所有安装态都要重新生成到合并后的新契约：
-
-- `anchored-standard`
-- `anchored-creative`
-- `matlab-agentic-preset-anchored`（当前仍缺工具偏好句，必须升级）
-
-重新生成后**完全重启 DSH**；standing mount 会复用旧代际，只改文件不重启会
-新旧混用。
+- 内置 zero preset 显示名：`标准模式-梁圣版` / `PTC模式-梁圣版` /
+  `创造模式-梁圣版`；`minimal-zero` 显示名 `极简模式`（不带梁圣版）。
+- `matlab-agentic-preset` 原位 patch（显示名保持 `Matlab Agentic Preset`）。
+- 所有安装态生成后无需重启即可出现在列表，但**选中/挂载需完全重启 DSH**；
+  headless 新进程可正常挂载（`verify/run-verify.mjs`）。
 
 ## 6. 验证要求（用户已确认）
 
-- zero / whoami 的稳定性由用户实测，但**不能只看首条回复**，要看完整链条：
-  期望全程 `We need / We have / We …`，不回落 `Let me` / `The user asks`。
-- 当前会话（含本 session）已观察到全程 `we …` 形态，可作为参考基线；
-  anchor turn persona A' 是否影响首链，需要真机验证。
+- 不能只看首条回复的措辞：voice 会被鹦鹉学舌，不代表轨迹。看**完整链条的
+  行为分布**（session-metrics 分桶）与真实工具路径（是否走 pwsh、是否先
+  dev_tool_search 解锁专用工具再动手）。
+- 期望：整条链以 we-family 为主、let me 显著回落；行为上优先专用工具。
 
 ## 7. 已决项（用户最终决定）
 

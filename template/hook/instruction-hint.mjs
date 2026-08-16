@@ -153,12 +153,16 @@ export function apply(ctx, config) {
       if (userGlobalFiles.length > 0) {
         sections.push(`A user-global instruction file exists: ${USER_GLOBAL_CANDIDATE}.`)
       }
-      if (sections.length === 0) return decision
-
-      const text = [
-        ...sections,
-        'Do NOT assume their content. When a task touches this workspace, read the relevant instruction files first and follow them.',
+      const toolGuidance = [
+        'Tool guidance: before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.',
+        'If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names.',
       ].join(' ')
+      if (sections.length > 0) {
+        sections.push('Do NOT assume their content. When a task touches this workspace, read the relevant instruction files first and follow them.')
+      }
+      sections.push(toolGuidance)
+
+      const text = [...sections].join(' ')
 
       return {
         ...decision,

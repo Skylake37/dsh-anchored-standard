@@ -47,7 +47,10 @@ epoch 回落到模式基集 + `compactionTools`，等边界之后的新晋升信
 - 晋升状态机：`compaction-epoch` 的事件驱动 `(boundary, promoted)`；
 - resident 目录：`minimal` 基集 = `bootstrapTools`；`empty` 基集 = shells +
   `str_replace_editor`；再加三个发现工具与已解锁工具；
-- persona 阶段收敛：受控期用 `controlledPersonaText`，晋升后用 `personaText`；
+- persona：**永久 Minimal 原句**（`You are a helpful software engineer assistant.`），
+  不写任何 reasoning 风格指令——轨迹由条件间接选择（干净 persona + 首请求工具面 +
+  无注入 context），而不是让模型照着说；工具解锁/专用工具指引由
+  `instruction-hint.mjs` 在晋升后以 user 消息注入，不进 system persona；
 - context 过滤：受控期剥 `suppressedContextSources`；每请求剥
   `suppressedContextPlugins`；
 - 可选 cap：受控期注入 `bootstrapMaxTokens`，晋升后显式剥掉；
@@ -86,7 +89,9 @@ compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
 
 ### `instruction-hint.mjs`
 
-- 晋升后一次性注入“这些 instruction 文件存在，先读再动手”的短提示；
+- 晋升后一次性注入 user 消息：instruction 文件存在提示（若有）+ **工具指引**
+  （动 bash / str_replace_editor 前先 `dev_tool_search` 找专用工具并优先使用；
+  找不到工具时先解锁）；
 - 配置 `promoteOn`：anchored 与 gate 的 `promoteOn` 一致；zero/whoami 为
   `assistant-message`。
 

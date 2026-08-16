@@ -97,8 +97,8 @@ description: 功能完整。
 order: 1
 `
 
-const CONTROLLED_PERSONA = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.'
-const FULL_PERSONA = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.'
+const CONTROLLED_PERSONA = 'You are a helpful software engineer assistant.'
+const FULL_PERSONA = CONTROLLED_PERSONA
 
 const TEMPLATE_DEFAULTS = {
   mode: 'anchored',
@@ -174,8 +174,8 @@ test('buildAnchorBootstrapRow renders the anchored profile row', () => {
   assert.match(row, /subagents: resident/)
   assert.match(row, /bootstrapTools: \["bash", "str_replace_editor"\]/)
   assert.match(row, /promoteOn: either/)
-  assert.match(row, /controlledPersonaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\."/)
-  assert.match(row, /personaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names\. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists\."/)
+  assert.match(row, /controlledPersonaText: "You are a helpful software engineer assistant\."/)
+  assert.match(row, /personaText: "You are a helpful software engineer assistant\."/)
   assert.match(row, /compactionTools:/)
   assert.doesNotMatch(row, /bootstrapMaxTokens/)
 })
