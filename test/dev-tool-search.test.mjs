@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name } from '../preset/dev-tool-search.mjs'
+import { apply, name } from '../shared/dev-tool-search.mjs'
 
 function register(schemas = []) {
   const registered = []

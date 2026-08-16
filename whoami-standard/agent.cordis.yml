@@ -43,7 +43,7 @@
 # exist; read them before acting" — and the model reads the files itself via
 # the filesystem tools when relevant.
 - id: instruction-hint
-  name: ../preset/instruction-hint.mjs
+  name: ./instruction-hint.mjs
   config:
     promoteOn: assistant-message
 
@@ -52,16 +52,16 @@
 # (web_search, subagent, workflow, …) are unlocked on demand via
 # dev_tool_search.
 - id: dev-tool-search
-  name: ../preset/dev-tool-search.mjs
+  name: ./dev-tool-search.mjs
 
 # V4 Pro conditions strongly on the API tool catalog. The first model request
-# therefore carries ZERO tools: `whoami-turn` seeds the fixed "你是谁" user
+# therefore carries ZERO tools: `anchor-turn` seeds the fixed "你是谁" user
 # message, this bootstrap strips the whole catalog, and the model's
 # self-introduction reply is the promotion signal. After that assistant
-# response is durable, later step assemblies narrow to the minimal RESIDENT
-# set (shells + str_replace_editor + the discovery tools + explicitly unlocked
-# tools) instead of the full Standard dump — the post-promotion regression
-# fix. Subagents also run the whoami anchor and zero-tool bootstrap
+# response is durable, later step assemblies narrow to the minimal
+# RESIDENT set (shells + str_replace_editor + the discovery tools + explicitly
+# unlocked tools) instead of the full Standard dump — the post-promotion
+# regression fix. Subagents also run the whoami anchor and zero-tool bootstrap
 # (`includeSubagents: true`); after the anchor reply they see the resident
 # catalog.
 #
@@ -73,7 +73,7 @@
 # COMPACTION (local addition): after `compaction/end` the session falls back
 # to the controlled phase — shells + `compactionTools` — until a NEW durable
 # assistant message exists past the boundary (epoch-aware, see
-# preset/compaction-epoch.mjs). The zero-tool anchor applies ONLY to the very
+# compaction-epoch.mjs). The zero-tool anchor applies ONLY to the very
 # first request; post-compaction the model is mid-task and keeps working.
 - id: zero-tool-bootstrap
   name: ./zero-tool-bootstrap.mjs
@@ -90,8 +90,8 @@
 # Anchoring on first message — not session creation — keeps the blank-session
 # preset switcher usable. The anchor text is configurable via `text`; set
 # `includeSubagents: true` so subagents also take the whoami anchor turn.
-- id: whoami-turn
-  name: ./whoami-turn.mjs
+- id: anchor-turn
+  name: ./anchor-turn.mjs
   config:
     text: 你是谁
     includeSubagents: true
@@ -113,14 +113,14 @@
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
 
-# Windows-only `bash` tool (see preset/custom-bash.mjs): the official bash
+# Windows-only `bash` tool (see custom-bash.mjs): the official bash
 # needs a PTY, and DSH's PTY backend is linux/darwin-only. This row presents
 # the SAME tool name (`bash`) with a Minimal-compatible description but spawns
 # Git Bash through the ordinary cross-platform subprocess seam. `bashPath`
 # defaults to `bash` on PATH; point it at Git Bash explicitly when the WSL
 # shim would otherwise be picked up.
 - id: custom-bash
-  name: ../preset/custom-bash.mjs
+  name: ./custom-bash.mjs
   disabled: !!js process.platform !== 'win32'
   config:
     bashPath: 'C:\Program Files\Git\bin\bash.exe'
@@ -186,7 +186,7 @@
   name: '@deepseek-ai/dsh-skill-filesystem'
 
 - id: skill-search
-  name: ../preset/skill-search.mjs
+  name: ./skill-search.mjs
 
 # ── goals ───────────────────────────────────────────────────────────────────
 
