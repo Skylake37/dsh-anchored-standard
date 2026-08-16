@@ -91,7 +91,10 @@ tools/
   reasoning with We need.`，本机实测首链稳定 "We need understand…"）和工具
   解锁指引（`If a tool you need is not in your current tool list, do not
   conclude it is unavailable: after your first tool call, call dev_tool_search
-  with no query to list every unlockable tool, then unlock the exact names.`）。
+  with no query to list every unlockable tool, then unlock the exact names.`）
+   和“优先专用工具”行为提示（`Before doing work with bash or
+   str_replace_editor, check dev_tool_search for a purpose-built tool and
+   prefer it whenever one exists.`，针对模型能解锁却死磕 shell 的问题）。
   如需恢复上游逐字节原句，生成时
   `--bootstrap-persona-text "You are a helpful software engineer assistant."`。
   该 persona 保持**整个 session**（晋升后不恢复源 persona）。

@@ -110,7 +110,7 @@ const TEMPLATE_DEFAULTS = {
   delegationDepthExempt: true,
   suppressedContextSources: ['agent-instructions', 'skill-catalog'],
   suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'],
-  bootstrapPersonaText: 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names.',
+  bootstrapPersonaText: 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.',
   compactionTools: ['read', 'write', 'edit', 'glob', 'grep', 'todo_write', 'ask_user_question'],
 }
 
@@ -166,7 +166,7 @@ test('buildBootstrapRow pins tools, promotion, and the compaction work set', () 
   assert.match(uncapped, /promoteOn: either/)
   assert.match(uncapped, /suppressedContextSources: \["agent-instructions", "skill-catalog"\]/)
   assert.match(uncapped, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(uncapped, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names."/)
+  assert.match(uncapped, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
   assert.match(uncapped, /compactionTools: \["read", "write", "edit", "glob", "grep", "todo_write", "ask_user_question"\]/)
   assert.doesNotMatch(uncapped, /bootstrapMaxTokens/)
   const capped = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapMaxTokens: 1024 })
@@ -215,7 +215,7 @@ test('loadTemplateDefaults reads the upstream promotion-flow defaults', async ()
   assert.equal(defaults.delegationDepthExempt, true)
   assert.deepEqual(defaults.suppressedContextSources, ['agent-instructions', 'skill-catalog'])
   assert.deepEqual(defaults.suppressedContextPlugins, ['@deepseek-ai/dsh-system-prompt'])
-  assert.equal(defaults.bootstrapPersonaText, 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names.')
+  assert.equal(defaults.bootstrapPersonaText, 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.')
   assert.deepEqual(defaults.compactionTools, ['read', 'write', 'edit', 'glob', 'grep', 'todo_write', 'ask_user_question'])
   assert.equal('bootstrapMaxTokens' in defaults, false)
   assert.equal(DEFAULTS_SOURCE.href.includes('/template/defaults.json'), true)
@@ -249,7 +249,7 @@ test('generateAnchoredPreset stamps the complete upstream flow on a standard pre
   assert.match(composition, /promoteOn: either/)
   assert.doesNotMatch(composition, /bootstrapMaxTokens/)
   assert.match(composition, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(composition, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names."/)
+  assert.match(composition, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
   assert.match(composition, /compactionTools:/)
   assert.match(composition, /- id: instruction-hint/)
   assert.match(composition, /- id: dev-tool-search/)
@@ -326,7 +326,7 @@ test('buildAnchorRows renders the whoami flavor of the anchor-turn flow', () => 
   assert.match(rows, /name: \.\/anchor-turn\.mjs/)
   assert.match(rows, /text: "你是谁"/)
   assert.match(rows, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(rows, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names."/)
+  assert.match(rows, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
   assert.match(rows, /compactionTools:/)
 })
 
