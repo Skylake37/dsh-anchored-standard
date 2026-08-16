@@ -55,7 +55,7 @@ Upstream experimentally tunes anchor parameters (e.g. the tool list,
 `bootstrapMaxTokens`, promotion events, suppressed context sources). After
 merging upstream, follow the mapping table in `template/README.md` and update
 `template/defaults.json` (and, only when the hook algorithm itself changed,
-`template/hook/tool-bootstrap.mjs`). Then re-run the tests and regenerate any
+`template/hook/anchor-bootstrap.mjs`). Then re-run the tests and regenerate any
 installed presets.
 
 ## Done checks

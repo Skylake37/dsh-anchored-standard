@@ -5,9 +5,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import {
-  buildBootstrapRow,
+  buildAnchorBootstrapRow,
   buildCompanionRows,
-  buildAnchorRows,
   DEFAULTS_SOURCE,
   detectBootstrapTools,
   generateAnchoredPreset,
@@ -15,6 +14,7 @@ import {
   insertBootstrapRow,
   loadTemplateDefaults,
   MINIMAL_BOOTSTRAP_TOOLS,
+  MODE_PROFILES,
   parseArgs,
   patchGuardedBundle,
   patchPresetMeta,
@@ -97,6 +97,20 @@ description: 功能完整。
 order: 1
 `
 
+const CONTROLLED_PERSONA = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.'
+const FULL_PERSONA = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.'
+
+const TEMPLATE_DEFAULTS = {
+  mode: 'anchored',
+  promoteOn: 'either',
+  subagents: 'resident',
+  suppressedContextSources: ['agent-instructions', 'skill-catalog'],
+  suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'],
+  controlledPersonaText: CONTROLLED_PERSONA,
+  personaText: FULL_PERSONA,
+  compactionTools: ['read', 'write', 'edit', 'glob', 'grep', 'todo_write', 'ask_user_question'],
+}
+
 async function fixturePreset(parent, id, composition = STANDARD_COMPOSITION) {
   const dir = join(parent, id)
   await mkdir(dir, { recursive: true })
@@ -105,21 +119,11 @@ async function fixturePreset(parent, id, composition = STANDARD_COMPOSITION) {
   return dir
 }
 
-const TEMPLATE_DEFAULTS = {
-  promoteOn: 'either',
-  delegationDepthExempt: true,
-  suppressedContextSources: ['agent-instructions', 'skill-catalog'],
-  suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt'],
-  bootstrapPersonaText: 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.',
-  compactionTools: ['read', 'write', 'edit', 'glob', 'grep', 'todo_write', 'ask_user_question'],
-}
-
 test('detectBootstrapTools pins the PR14 Minimal pair for both supported families', () => {
   assert.deepEqual(detectBootstrapTools(STANDARD_COMPOSITION), MINIMAL_BOOTSTRAP_TOOLS)
   assert.deepEqual(detectBootstrapTools(MINIMAL_COMPOSITION), MINIMAL_BOOTSTRAP_TOOLS)
   assert.deepEqual(detectBootstrapTools(MINIMAL_GROUP_COMPOSITION), MINIMAL_BOOTSTRAP_TOOLS)
   assert.equal(detectBootstrapTools(ARBITRARY_COMPOSITION), undefined)
-  // The persistent-bash package name must not satisfy the plain bash matcher.
   assert.deepEqual(
     detectBootstrapTools(`- id: x
   name: '@deepseek-ai/dsh-tool-bash-persistent'
@@ -160,21 +164,45 @@ test('stampMinimalToolRows adds custom-bash when bash is pinned, without touchin
   assert.doesNotMatch(stamped.composition, /- id: bootstrap-filesystem/)
 })
 
-test('buildBootstrapRow pins tools, promotion, and the compaction work set', () => {
-  const uncapped = buildBootstrapRow(MINIMAL_BOOTSTRAP_TOOLS, TEMPLATE_DEFAULTS)
-  assert.match(uncapped, /bootstrapTools: \["bash", "str_replace_editor"\]/)
-  assert.match(uncapped, /promoteOn: either/)
-  assert.match(uncapped, /suppressedContextSources: \["agent-instructions", "skill-catalog"\]/)
-  assert.match(uncapped, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(uncapped, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
-  assert.match(uncapped, /compactionTools: \["read", "write", "edit", "glob", "grep", "todo_write", "ask_user_question"\]/)
-  assert.doesNotMatch(uncapped, /bootstrapMaxTokens/)
-  const capped = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapMaxTokens: 1024 })
+test('buildAnchorBootstrapRow renders the anchored profile row', () => {
+  const row = buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, bootstrapTools: MINIMAL_BOOTSTRAP_TOOLS })
+  assert.match(row, /- id: anchor-bootstrap/)
+  assert.match(row, /name: \.\/anchor-bootstrap\.mjs/)
+  assert.match(row, /mode: anchored/)
+  assert.match(row, /firstTurnTools: minimal/)
+  assert.match(row, /anchorText: none/)
+  assert.match(row, /subagents: resident/)
+  assert.match(row, /bootstrapTools: \["bash", "str_replace_editor"\]/)
+  assert.match(row, /promoteOn: either/)
+  assert.match(row, /controlledPersonaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\."/)
+  assert.match(row, /personaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names\. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists\."/)
+  assert.match(row, /compactionTools:/)
+  assert.doesNotMatch(row, /bootstrapMaxTokens/)
+})
+
+test('buildAnchorBootstrapRow renders the zero and whoami profile rows', () => {
+  const zero = buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, mode: 'zero', promoteOn: undefined })
+  assert.match(zero, /mode: zero/)
+  assert.match(zero, /firstTurnTools: empty/)
+  assert.match(zero, /anchorText: test-notice/)
+  assert.match(zero, /subagents: resident/)
+  assert.match(zero, /promoteOn: assistant-message/)
+  assert.doesNotMatch(zero, /bootstrapTools:/)
+
+  const whoami = buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, mode: 'whoami', promoteOn: undefined })
+  assert.match(whoami, /mode: whoami/)
+  assert.match(whoami, /firstTurnTools: empty/)
+  assert.match(whoami, /anchorText: whoami/)
+  assert.match(whoami, /subagents: anchor/)
+  assert.match(whoami, /promoteOn: assistant-message/)
+  assert.doesNotMatch(whoami, /bootstrapTools:/)
+})
+
+test('buildAnchorBootstrapRow applies the optional cap and rejects incompatible promoteOn', () => {
+  const capped = buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, bootstrapMaxTokens: 1024 })
   assert.match(capped, /bootstrapMaxTokens: 1024/)
-  const bare = buildBootstrapRow(['bash'], { ...TEMPLATE_DEFAULTS, bootstrapPersonaText: undefined, suppressedContextPlugins: [], compactionTools: [] })
-  assert.doesNotMatch(bare, /bootstrapPersonaText/)
-  assert.doesNotMatch(bare, /suppressedContextPlugins/)
-  assert.doesNotMatch(bare, /compactionTools/)
+  assert.throws(() => buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, mode: 'zero', promoteOn: 'either' }), /assistant-message/)
+  assert.throws(() => buildAnchorBootstrapRow({ mode: 'nope' }), /mode/)
 })
 
 test('buildCompanionRows renders the instruction hint and discovery tools', () => {
@@ -187,12 +215,12 @@ test('buildCompanionRows renders the instruction hint and discovery tools', () =
 })
 
 test('insertBootstrapRow puts the hook row before every other entry and keeps leading comments', () => {
-  const row = buildBootstrapRow(MINIMAL_BOOTSTRAP_TOOLS, TEMPLATE_DEFAULTS)
+  const row = buildAnchorBootstrapRow({ ...TEMPLATE_DEFAULTS, bootstrapTools: MINIMAL_BOOTSTRAP_TOOLS })
   const patched = insertBootstrapRow(STANDARD_COMPOSITION, row)
   const lines = patched.split('\n')
   assert.equal(lines[0], '# leading comment block')
   const firstEntry = lines.findIndex(line => /^\s*-\s/.test(line))
-  assert.match(lines[firstEntry], /- id: tool-bootstrap/)
+  assert.match(lines[firstEntry], /- id: anchor-bootstrap/)
   assert.ok(lines.indexOf('- id: persona') > firstEntry)
   assert.ok(patched.endsWith('\n'))
 })
@@ -209,19 +237,21 @@ test('patchPresetMeta replaces known fields in place and appends missing ones', 
   assert.equal(readMetaField(patched, 'name'), '标准模式 Anchored (experimental)')
 })
 
-test('loadTemplateDefaults reads the upstream promotion-flow defaults', async () => {
+test('loadTemplateDefaults reads the unified mode defaults', async () => {
   const defaults = await loadTemplateDefaults()
+  assert.equal(defaults.mode, 'anchored')
   assert.equal(defaults.promoteOn, 'either')
-  assert.equal(defaults.delegationDepthExempt, true)
+  assert.equal(defaults.subagents, 'resident')
   assert.deepEqual(defaults.suppressedContextSources, ['agent-instructions', 'skill-catalog'])
   assert.deepEqual(defaults.suppressedContextPlugins, ['@deepseek-ai/dsh-system-prompt'])
-  assert.equal(defaults.bootstrapPersonaText, 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.')
+  assert.equal(defaults.controlledPersonaText, CONTROLLED_PERSONA)
+  assert.equal(defaults.personaText, FULL_PERSONA)
   assert.deepEqual(defaults.compactionTools, ['read', 'write', 'edit', 'glob', 'grep', 'todo_write', 'ask_user_question'])
   assert.equal('bootstrapMaxTokens' in defaults, false)
   assert.equal(DEFAULTS_SOURCE.href.includes('/template/defaults.json'), true)
 })
 
-test('generateAnchoredPreset stamps the complete upstream flow on a standard preset', async (t) => {
+test('generateAnchoredPreset stamps the unified hook on a standard preset', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const sourceDir = await fixturePreset(root, 'standard')
@@ -235,21 +265,30 @@ test('generateAnchoredPreset stamps the complete upstream flow on a standard pre
 
   assert.equal(result.written, true)
   assert.equal(result.plan.id, 'standard-anchored')
+  assert.equal(result.plan.mode, 'anchored')
+  assert.equal(result.plan.firstTurnTools, 'minimal')
+  assert.equal(result.plan.anchorText, 'none')
+  assert.equal(result.plan.subagents, 'resident')
   assert.deepEqual(result.plan.bootstrapTools, MINIMAL_BOOTSTRAP_TOOLS)
   assert.deepEqual(result.plan.appendedToolGroups, ['persistent-shell', 'bootstrap-filesystem', 'custom-bash'])
   assert.equal(result.plan.toolBashDisabled, true)
   assert.deepEqual(result.plan.disabledSourceRows.sort(), ['agent-instructions', 'tool-skill'])
   const target = join(root, 'out', 'standard-anchored')
   const composition = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
-  assert.ok(hasRow(composition, 'tool-bootstrap'))
-  assert.ok(composition.indexOf('- id: tool-bootstrap') < composition.indexOf('- id: instruction-hint'))
+  assert.ok(hasRow(composition, 'anchor-bootstrap'))
+  assert.ok(composition.indexOf('- id: anchor-bootstrap') < composition.indexOf('- id: instruction-hint'))
   assert.ok(composition.indexOf('- id: instruction-hint') < composition.indexOf('- id: persona'))
-  assert.match(composition, /name: \.\/tool-bootstrap\.mjs/)
+  assert.match(composition, /name: \.\/anchor-bootstrap\.mjs/)
+  assert.match(composition, /mode: anchored/)
+  assert.match(composition, /firstTurnTools: minimal/)
+  assert.match(composition, /anchorText: none/)
+  assert.match(composition, /subagents: resident/)
   assert.match(composition, /bootstrapTools: \["bash", "str_replace_editor"\]/)
   assert.match(composition, /promoteOn: either/)
   assert.doesNotMatch(composition, /bootstrapMaxTokens/)
+  assert.match(composition, /controlledPersonaText:/)
+  assert.match(composition, /personaText:/)
   assert.match(composition, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(composition, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
   assert.match(composition, /compactionTools:/)
   assert.match(composition, /- id: instruction-hint/)
   assert.match(composition, /- id: dev-tool-search/)
@@ -257,37 +296,61 @@ test('generateAnchoredPreset stamps the complete upstream flow on a standard pre
   assert.match(composition, /- id: persistent-shell/)
   assert.match(composition, /- id: bootstrap-filesystem/)
   assert.match(composition, /- id: custom-bash/)
-  // Source automatic injections are disabled in favor of the on-demand flow.
   const agentBlock = composition.split('- id: tool-bash')[0]
   assert.match(agentBlock, /- id: agent-instructions\s*\n\s*disabled: true/)
   assert.match(composition, /- id: tool-skill\s*\n\s*disabled: true/)
-  for (const file of ['tool-bootstrap.mjs', 'compaction-epoch.mjs', 'instruction-hint.mjs', 'dev-tool-search.mjs', 'skill-search.mjs', 'custom-bash.mjs']) {
+  for (const file of ['anchor-bootstrap.mjs', 'compaction-epoch.mjs', 'instruction-hint.mjs', 'dev-tool-search.mjs', 'skill-search.mjs', 'custom-bash.mjs']) {
     assert.ok(await readFile(join(target, file), 'utf8'), file)
   }
-  const hook = await readFile(join(target, 'tool-bootstrap.mjs'), 'utf8')
-  assert.match(hook, /export const name = 'anchored-tool-bootstrap'/)
+  for (const stale of ['tool-bootstrap.mjs', 'zero-tool-bootstrap.mjs', 'anchor-turn.mjs']) {
+    await assert.rejects(readFile(join(target, stale), 'utf8'))
+  }
+  const hook = await readFile(join(target, 'anchor-bootstrap.mjs'), 'utf8')
+  assert.match(hook, /export const name = 'anchor-bootstrap'/)
   assert.match(hook, /createEpochPromotion/)
   const meta = await readFile(join(target, 'preset.yml'), 'utf8')
   assert.match(meta, /标准模式 Anchored \(experimental\)/)
 })
 
-test('generateAnchoredPreset auto-succeeds on a Minimal-family preset and adds the windows bash row', async (t) => {
+test('generateAnchoredPreset generates zero and whoami profiles with the single hook', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  const minimalDir = await fixturePreset(root, 'minimal', MINIMAL_COMPOSITION)
-  const result = await generateAnchoredPreset({
-    from: minimalDir,
-    to: 'minimal-anchored',
+  const sourceDir = await fixturePreset(root, 'standard')
+
+  const zero = await generateAnchoredPreset({
+    from: sourceDir,
+    to: 'standard-zero',
     root: join(root, 'out'),
     defaults: TEMPLATE_DEFAULTS,
+    mode: 'zero',
   })
-  assert.deepEqual(result.plan.bootstrapTools, MINIMAL_BOOTSTRAP_TOOLS)
-  assert.deepEqual(result.plan.appendedToolGroups, ['custom-bash'])
-  assert.equal(result.plan.toolBashDisabled, false)
-  const composition = await readFile(join(root, 'out', 'minimal-anchored', 'agent.cordis.yml'), 'utf8')
-  assert.doesNotMatch(composition, /- id: persistent-shell/)
-  assert.doesNotMatch(composition, /- id: bootstrap-filesystem/)
-  assert.match(composition, /- id: custom-bash/)
+  assert.equal(zero.plan.mode, 'zero')
+  assert.equal(zero.plan.firstTurnTools, 'empty')
+  assert.equal(zero.plan.anchorText, 'test-notice')
+  const zeroComposition = await readFile(join(root, 'out', 'standard-zero', 'agent.cordis.yml'), 'utf8')
+  assert.match(zeroComposition, /- id: anchor-bootstrap/)
+  assert.match(zeroComposition, /mode: zero/)
+  assert.match(zeroComposition, /firstTurnTools: empty/)
+  assert.match(zeroComposition, /anchorText: test-notice/)
+  assert.match(zeroComposition, /promoteOn: assistant-message/)
+  assert.doesNotMatch(zeroComposition, /bootstrapTools:/)
+
+  const whoami = await generateAnchoredPreset({
+    from: sourceDir,
+    to: 'standard-whoami',
+    root: join(root, 'out'),
+    defaults: TEMPLATE_DEFAULTS,
+    whoami: true,
+  })
+  assert.equal(whoami.plan.mode, 'whoami')
+  assert.equal(whoami.plan.firstTurnTools, 'empty')
+  assert.equal(whoami.plan.anchorText, 'whoami')
+  assert.equal(whoami.plan.subagents, 'anchor')
+  const whoamiComposition = await readFile(join(root, 'out', 'standard-whoami', 'agent.cordis.yml'), 'utf8')
+  assert.match(whoamiComposition, /mode: whoami/)
+  assert.match(whoamiComposition, /anchorText: whoami/)
+  assert.match(whoamiComposition, /subagents: anchor/)
+  assert.match(whoamiComposition, /promoteOn: assistant-message/)
 })
 
 test('generateAnchoredPreset fails loud for unknown families and refuses double stamping', async (t) => {
@@ -317,54 +380,6 @@ test('generateAnchoredPreset fails loud for unknown families and refuses double 
   )
 })
 
-test('buildAnchorRows renders the whoami flavor of the anchor-turn flow', () => {
-  const rows = buildAnchorRows(TEMPLATE_DEFAULTS)
-  assert.match(rows, /- id: zero-tool-bootstrap/)
-  assert.match(rows, /name: \.\/zero-tool-bootstrap\.mjs/)
-  assert.match(rows, /includeSubagents: true/)
-  assert.match(rows, /- id: anchor-turn/)
-  assert.match(rows, /name: \.\/anchor-turn\.mjs/)
-  assert.match(rows, /text: "你是谁"/)
-  assert.match(rows, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
-  assert.match(rows, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."/)
-  assert.match(rows, /compactionTools:/)
-})
-
-test('buildAnchorRows can render the zero-anchored flavor (default text, plain subagents)', () => {
-  const rows = buildAnchorRows({
-    text: 'This round is a test. Tools are not open yet; all tools will open next round.',
-    includeSubagents: false,
-    suppressedContextSources: ['agent-instructions', 'skill-catalog'],
-  })
-  assert.match(rows, /- id: anchor-turn/)
-  assert.match(rows, /name: \.\/anchor-turn\.mjs/)
-  assert.match(rows, /text: "This round is a test\. Tools are not open yet; all tools will open next round\."/)
-  assert.match(rows, /includeSubagents: false/)
-})
-
-test('generateAnchoredPreset supports the whoami-standard flow', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
-  const sourceDir = await fixturePreset(root, 'standard')
-  const result = await generateAnchoredPreset({
-    from: sourceDir,
-    to: 'standard-whoami',
-    root: join(root, 'out'),
-    defaults: TEMPLATE_DEFAULTS,
-    whoami: true,
-  })
-  assert.equal(result.plan.whoami, true)
-  const target = join(root, 'out', 'standard-whoami')
-  const composition = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
-  assert.doesNotMatch(composition, /- id: tool-bootstrap/)
-  assert.match(composition, /- id: zero-tool-bootstrap/)
-  assert.match(composition, /- id: anchor-turn/)
-  assert.match(composition, /promoteOn: assistant-message/)
-  for (const file of ['zero-tool-bootstrap.mjs', 'anchor-turn.mjs', 'compaction-epoch.mjs', 'custom-bash.mjs']) {
-    assert.ok(await readFile(join(target, file), 'utf8'), file)
-  }
-})
-
 test('generateAnchoredPreset refuses to overwrite and supports dry-run', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -376,25 +391,32 @@ test('generateAnchoredPreset refuses to overwrite and supports dry-run', async (
   await assert.rejects(generateAnchoredPreset(options), /already exists/)
 })
 
-test('parseArgs maps CLI options and rejects unknown flags', () => {
+test('parseArgs maps mode, persona flags, and the --whoami alias', () => {
   const parsed = parseArgs([
     '--from', 'standard',
+    '--mode', 'whoami',
     '--bootstrap-tools', 'bash,str_replace_editor',
     '--max-tokens', '2048',
     '--compaction-tools', 'read,grep',
     '--win-bash-path', 'D:/Git/bin/bash.exe',
-    '--whoami',
+    '--persona-text', 'full persona',
+    '--controlled-persona-text', 'controlled persona',
     '--dry-run',
   ])
   assert.equal(parsed.from, 'standard')
+  assert.equal(parsed.mode, 'whoami')
   assert.equal(parsed.bootstrapTools, 'bash,str_replace_editor')
   assert.equal(parsed.bootstrapMaxTokens, 2048)
   assert.deepEqual(parsed.compactionTools, ['read', 'grep'])
   assert.equal(parsed.winBashPath, 'D:/Git/bin/bash.exe')
-  assert.equal(parsed.whoami, true)
+  assert.equal(parsed.personaText, 'full persona')
+  assert.equal(parsed.controlledPersonaText, 'controlled persona')
   assert.equal(parsed.dryRun, true)
   assert.throws(() => parseArgs(['--nope']), /unknown option/)
   assert.throws(() => parseArgs(['--from']), /requires a value/)
+
+  const legacy = parseArgs(['--from', 'standard', '--whoami'])
+  assert.equal(legacy.whoami, true)
 })
 
 test('patchGuardedBundle guards the registration, tolerates duplicates on the shared registry, and renames the plugin', () => {
@@ -445,4 +467,14 @@ test('generateAnchoredPreset requires the guard bundle for tool-cordis sources a
   const guarded = await readFile(join(root, 'out', 'cordis-anchored', 'tool-cordis-guarded.mjs'), 'utf8')
   assert.match(guarded, /already registered/)
   assert.match(guarded, /tool-cordis-guarded/)
+})
+
+test('MODE_PROFILES exports the three validated profiles', () => {
+  assert.deepEqual(MODE_PROFILES.anchored, { firstTurnTools: 'minimal', anchorText: 'none', subagents: 'resident', promoteOn: 'either' })
+  assert.deepEqual(MODE_PROFILES.zero, { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'resident', promoteOn: 'assistant-message' })
+  assert.deepEqual(MODE_PROFILES.whoami, { firstTurnTools: 'empty', anchorText: 'whoami', subagents: 'anchor', promoteOn: 'assistant-message' })
+})
+
+test('renderCustomBashRow points at Git Bash', () => {
+  assert.match(renderCustomBashRow(), /bashPath: 'C:\\Program Files\\Git\\bin\\bash\.exe'/)
 })

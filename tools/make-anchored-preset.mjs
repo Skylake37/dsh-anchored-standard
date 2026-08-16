@@ -28,7 +28,7 @@
  * Anchor parameters come from `template/defaults.json` (downstream-owned) and
  * can be overridden per generation from the CLI. After merging upstream
  * changes into this fork, sync that one file (and, only when the hook
- * algorithm changed, `template/hook/tool-bootstrap.mjs`); no upstream-owned
+ * algorithm changed, `template/hook/anchor-bootstrap.mjs`); no upstream-owned
  * file is edited by this tool.
  *
  * Usage:
@@ -51,7 +51,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const COMPOSITION_FILE = 'agent.cordis.yml'
 export const PRESET_META_FILE = 'preset.yml'
-export const HOOK_FILE_NAME = 'tool-bootstrap.mjs'
+export const HOOK_FILE_NAME = 'anchor-bootstrap.mjs'
 
 /** Companion hook plugins stamped beside the bootstrap hook (upstream flow). */
 export const COMPANION_HOOK_FILES = [
@@ -62,18 +62,19 @@ export const COMPANION_HOOK_FILES = [
   'custom-bash.mjs',
 ]
 
-/** Anchor-turn plugins for the zero-tool first-turn modes (upstream
- * `zero-anchored-standard` / `whoami-standard`; the `anchor-turn` row's
- * `text` decides which flavor). */
-export const ANCHOR_HOOK_FILES = ['anchor-turn.mjs', 'zero-tool-bootstrap.mjs']
+/** Named mode profiles; the generated row always writes the derived atomic fields. */
+export const MODE_PROFILES = {
+  anchored: { firstTurnTools: 'minimal', anchorText: 'none', subagents: 'resident', promoteOn: 'either' },
+  zero: { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'resident', promoteOn: 'assistant-message' },
+  whoami: { firstTurnTools: 'empty', anchorText: 'whoami', subagents: 'anchor', promoteOn: 'assistant-message' },
+}
 
-/** The template hooks this generator stamps into every target preset. */
-export const HOOK_SOURCE = new URL('../template/hook/tool-bootstrap.mjs', import.meta.url)
+export const MODE_VALUES = new Set(Object.keys(MODE_PROFILES))
+
+/** The template hook this generator stamps into every target preset. */
+export const HOOK_SOURCE = new URL('../template/hook/anchor-bootstrap.mjs', import.meta.url)
 export const COMPANION_HOOK_SOURCES = Object.fromEntries(
   COMPANION_HOOK_FILES.map((file) => [file, new URL(`../template/hook/${file}`, import.meta.url)]),
-)
-export const ANCHOR_HOOK_SOURCES = Object.fromEntries(
-  ANCHOR_HOOK_FILES.map((file) => [file, new URL(`../template/hook/${file}`, import.meta.url)]),
 )
 
 /** Downstream-owned anchor parameters, separate from upstream files. */
@@ -215,34 +216,54 @@ function yamlList(items) {
 }
 
 /**
- * Render the agent.cordis.yml row for the reusable hook.
- * @param bootstrapTools - the exact bootstrap tool list.
+ * Render the single agent.cordis.yml row for the unified anchor-bootstrap hook.
+ * `mode` selects a validated profile and its derived atomic fields.
  */
-export function buildBootstrapRow(
-  bootstrapTools,
-  {
-    promoteOn = 'either',
-    bootstrapMaxTokens = undefined,
-    delegationDepthExempt = true,
-    suppressedContextSources = ['agent-instructions', 'skill-catalog'],
-    suppressedContextPlugins = [],
-    bootstrapPersonaText = undefined,
-    compactionTools = [],
-  } = {},
-) {
-  const config = [`    bootstrapTools: ${yamlList(bootstrapTools)}`]
-  config.push(`    promoteOn: ${promoteOn}`)
+export function buildAnchorBootstrapRow({
+  mode = 'anchored',
+  bootstrapTools = MINIMAL_BOOTSTRAP_TOOLS,
+  promoteOn = undefined,
+  bootstrapMaxTokens = undefined,
+  suppressedContextSources = ['agent-instructions', 'skill-catalog'],
+  suppressedContextPlugins = [],
+  personaText = undefined,
+  controlledPersonaText = undefined,
+  compactionTools = [],
+} = {}) {
+  if (!MODE_VALUES.has(mode)) {
+    throw new Error(`mode must be one of ${[...MODE_VALUES].join(', ')}; got ${JSON.stringify(mode)}`)
+  }
+  const profile = MODE_PROFILES[mode]
+  const firstTurnTools = profile.firstTurnTools
+  const anchorText = profile.anchorText
+  const subagents = profile.subagents
+  const resolvedPromoteOn = anchorText === 'none' ? (promoteOn ?? profile.promoteOn) : profile.promoteOn
+  if (anchorText !== 'none' && promoteOn !== undefined && promoteOn !== profile.promoteOn) {
+    throw new Error(`mode ${JSON.stringify(mode)} requires promoteOn "assistant-message"`)
+  }
+
+  const config = [
+    `    mode: ${mode}`,
+    `    firstTurnTools: ${firstTurnTools}`,
+    `    anchorText: ${anchorText}`,
+    `    subagents: ${subagents}`,
+  ]
+  if (firstTurnTools === 'minimal') {
+    assertStringList(bootstrapTools, 'bootstrapTools')
+    config.push(`    bootstrapTools: ${yamlList(bootstrapTools)}`)
+  }
+  config.push(`    promoteOn: ${resolvedPromoteOn}`)
   if (bootstrapMaxTokens !== undefined) config.push(`    bootstrapMaxTokens: ${bootstrapMaxTokens}`)
-  config.push(`    delegationDepthExempt: ${delegationDepthExempt}`)
   config.push(`    suppressedContextSources: ${yamlList(suppressedContextSources)}`)
   if (suppressedContextPlugins.length > 0) config.push(`    suppressedContextPlugins: ${yamlList(suppressedContextPlugins)}`)
-  if (bootstrapPersonaText !== undefined) config.push(`    bootstrapPersonaText: ${yamlDouble(bootstrapPersonaText)}`)
+  if (controlledPersonaText !== undefined) config.push(`    controlledPersonaText: ${yamlDouble(controlledPersonaText)}`)
+  if (personaText !== undefined) config.push(`    personaText: ${yamlDouble(personaText)}`)
   if (compactionTools.length > 0) config.push(`    compactionTools: ${yamlList(compactionTools)}`)
   return [
-    '# ── anchored bootstrap (generated by dsh-anchored-standard; keep this row FIRST) ──',
+    '# ── anchor-bootstrap (generated by dsh-anchored-standard; keep this row FIRST) ──',
     '# Registered before every other row, this plugin\'s pre-step strip is the final',
     '# waterfall transform. Do not add an inject list, and do not move this row.',
-    '- id: tool-bootstrap',
+    '- id: anchor-bootstrap',
     `  name: ./${HOOK_FILE_NAME}`,
     '  config:',
     ...config,
@@ -269,50 +290,6 @@ export function buildCompanionRows({ promoteOn = 'either' } = {}) {
     '',
     '- id: skill-search',
     '  name: ./skill-search.mjs',
-  ].join('\n')
-}
-
-/**
- * Render the `anchor-turn` + `zero-tool-bootstrap` rows for the zero-tool
- * first-turn modes (upstream `zero-anchored-standard` / `whoami-standard`).
- * The first model request sees only the anchor prompt on an EMPTY tool
- * surface; that reply promotes the session and the real message runs on the
- * NEXT turn with the resident catalog.
- *
- * The two flavors are one shared hook with different config:
- *  - whoami:      `text: '你是谁'`, `includeSubagents: true`  (generator default)
- *  - zero anchor: the hook's default test notice, `includeSubagents: false`
- */
-export function buildAnchorRows({
-  text = '你是谁',
-  includeSubagents = true,
-  suppressedContextSources = ['agent-instructions', 'skill-catalog'],
-  suppressedContextPlugins = [],
-  bootstrapPersonaText = undefined,
-  compactionTools = [],
-} = {}) {
-  const config = [
-    `    suppressedContextSources: ${yamlList(suppressedContextSources)}`,
-  ]
-  if (suppressedContextPlugins.length > 0) config.push(`    suppressedContextPlugins: ${yamlList(suppressedContextPlugins)}`)
-  if (bootstrapPersonaText !== undefined) config.push(`    bootstrapPersonaText: ${yamlDouble(bootstrapPersonaText)}`)
-  if (compactionTools.length > 0) config.push(`    compactionTools: ${yamlList(compactionTools)}`)
-  config.push(`    includeSubagents: ${includeSubagents}`)
-  return [
-    '# ── anchor-turn (generated by dsh-anchored-standard; keep this row FIRST) ──',
-    '# The first request sees only the anchor prompt on an EMPTY tool',
-    '# surface; that reply promotes the session and the real message runs next',
-    '# turn on the resident catalog.',
-    '- id: zero-tool-bootstrap',
-    '  name: ./zero-tool-bootstrap.mjs',
-    '  config:',
-    ...config,
-    '',
-    '- id: anchor-turn',
-    '  name: ./anchor-turn.mjs',
-    '  config:',
-    `    text: ${yamlDouble(text)}`,
-    `    includeSubagents: ${includeSubagents}`,
   ].join('\n')
 }
 
@@ -646,25 +623,39 @@ function assertStringList(value, field, allowEmpty = false) {
   return [...new Set(value)]
 }
 
+/** Optional non-empty string option. */
+function optionalNonEmptyString(value, field) {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`${field} must be a non-empty string`)
+  }
+  return value
+}
+
+const SUBAGENT_VALUES = new Set(['resident', 'bootstrap', 'anchor'])
+
 /** Validate one template defaults object (template/defaults.json shape). */
 export function validateTemplateDefaults(defaults) {
   if (defaults === null || typeof defaults !== 'object') {
     throw new TypeError('template defaults must be an object')
   }
+  const mode = defaults.mode ?? 'anchored'
+  if (!MODE_VALUES.has(mode)) {
+    throw new TypeError(`defaults.mode must be one of ${[...MODE_VALUES].join(', ')}`)
+  }
   if (!PROMOTE_ON_VALUES.has(defaults.promoteOn)) {
     throw new TypeError(`defaults.promoteOn must be one of ${[...PROMOTE_ON_VALUES].join(', ')}`)
   }
-  if (typeof defaults.delegationDepthExempt !== 'boolean') {
-    throw new TypeError('defaults.delegationDepthExempt must be a boolean')
+  const subagents = defaults.subagents ?? MODE_PROFILES[mode].subagents
+  if (!SUBAGENT_VALUES.has(subagents)) {
+    throw new TypeError(`defaults.subagents must be one of ${[...SUBAGENT_VALUES].join(', ')}`)
   }
   assertStringList(defaults.suppressedContextSources, 'defaults.suppressedContextSources', true)
   if (defaults.suppressedContextPlugins !== undefined) {
     assertStringList(defaults.suppressedContextPlugins, 'defaults.suppressedContextPlugins', true)
   }
-  if (defaults.bootstrapPersonaText !== undefined
-    && (typeof defaults.bootstrapPersonaText !== 'string' || defaults.bootstrapPersonaText.length === 0)) {
-    throw new TypeError('defaults.bootstrapPersonaText must be a non-empty string')
-  }
+  optionalNonEmptyString(defaults.personaText, 'defaults.personaText')
+  optionalNonEmptyString(defaults.controlledPersonaText, 'defaults.controlledPersonaText')
   if (defaults.compactionTools !== undefined) {
     assertStringList(defaults.compactionTools, 'defaults.compactionTools')
   }
@@ -684,10 +675,32 @@ export async function loadTemplateDefaults(source = DEFAULTS_SOURCE) {
 
 /** Merge CLI options over template defaults and validate the result once. */
 export function resolveOptions(options, template) {
-  const promoteOn = options.promoteOn ?? template.promoteOn
-  if (!PROMOTE_ON_VALUES.has(promoteOn)) {
+  const mode = options.mode ?? (options.whoami === true ? 'whoami' : (template.mode ?? 'anchored'))
+  if (!MODE_VALUES.has(mode)) {
+    throw new Error(`--mode must be one of ${[...MODE_VALUES].join(', ')}`)
+  }
+  const profile = MODE_PROFILES[mode]
+
+  const requestedPromoteOn = options.promoteOn ?? template.promoteOn
+  if (!PROMOTE_ON_VALUES.has(requestedPromoteOn)) {
     throw new Error(`--promote-on must be one of ${[...PROMOTE_ON_VALUES].join(', ')}`)
   }
+  const promoteOn = profile.anchorText === 'none' ? requestedPromoteOn : profile.promoteOn
+  if (profile.anchorText !== 'none' && options.promoteOn !== undefined && options.promoteOn !== profile.promoteOn) {
+    throw new Error(`--promote-on ${options.promoteOn} is incompatible with --mode ${mode}; use "assistant-message"`)
+  }
+
+  let subagents = profile.subagents
+  if (options.bootstrapSubagents === true) {
+    if (profile.anchorText !== 'none') {
+      throw new Error(`--bootstrap-subagents is only valid for --mode anchored`)
+    }
+    subagents = 'bootstrap'
+  }
+  if (!SUBAGENT_VALUES.has(subagents)) {
+    throw new Error(`subagents must be one of ${[...SUBAGENT_VALUES].join(', ')}`)
+  }
+
   const bootstrapMaxTokens = options.bootstrapMaxTokens
   if (bootstrapMaxTokens !== undefined && (!Number.isSafeInteger(bootstrapMaxTokens) || bootstrapMaxTokens <= 0)) {
     throw new Error('--max-tokens must be a positive safe integer')
@@ -696,17 +709,12 @@ export function resolveOptions(options, template) {
   if (!Number.isSafeInteger(order) || order < 0) {
     throw new Error('--order must be a non-negative safe integer')
   }
-  const delegationDepthExempt = options.bootstrapSubagents === true
-    ? false
-    : template.delegationDepthExempt
   const suppressedContextSources = options.suppressedContextSources ?? template.suppressedContextSources
   assertStringList(suppressedContextSources, '--suppress-sources', true)
   const suppressedContextPlugins = options.suppressedContextPlugins ?? template.suppressedContextPlugins ?? []
   assertStringList(suppressedContextPlugins, '--suppress-plugins', true)
-  const bootstrapPersonaText = options.bootstrapPersonaText ?? template.bootstrapPersonaText
-  if (bootstrapPersonaText !== undefined && (typeof bootstrapPersonaText !== 'string' || bootstrapPersonaText.length === 0)) {
-    throw new Error('--bootstrap-persona-text must be a non-empty string')
-  }
+  const personaText = optionalNonEmptyString(options.personaText ?? template.personaText, '--persona-text')
+  const controlledPersonaText = optionalNonEmptyString(options.controlledPersonaText ?? template.controlledPersonaText, '--controlled-persona-text')
   const compactionTools = options.compactionTools ?? template.compactionTools ?? []
   assertStringList(compactionTools, '--compaction-tools')
   const winBashPath = options.winBashPath ?? DEFAULT_WINDOWS_BASH_PATH
@@ -714,12 +722,14 @@ export function resolveOptions(options, template) {
     throw new Error('--win-bash-path must be a non-empty string')
   }
   return {
+    mode,
     promoteOn,
+    subagents,
     bootstrapMaxTokens,
-    delegationDepthExempt,
     suppressedContextSources,
     suppressedContextPlugins,
-    bootstrapPersonaText,
+    personaText,
+    controlledPersonaText,
     compactionTools,
     winBashPath,
     order,
@@ -747,8 +757,7 @@ export async function generateAnchoredPreset(options) {
   }
   const compositionPath = join(source.dir, COMPOSITION_FILE)
   const composition = await readUtf8(compositionPath)
-  const whoami = options.whoami === true
-  if (hasRow(composition, 'tool-bootstrap') || hasRow(composition, 'zero-tool-bootstrap')) {
+  if (hasRow(composition, 'tool-bootstrap') || hasRow(composition, 'zero-tool-bootstrap') || hasRow(composition, 'anchor-bootstrap')) {
     throw new Error(`source already mounts a bootstrap row: ${compositionPath}`)
   }
   const metaPath = join(source.dir, PRESET_META_FILE)
@@ -773,6 +782,7 @@ export async function generateAnchoredPreset(options) {
   }
   const template = options.defaults ?? await loadTemplateDefaults()
   const resolved = resolveOptions(options, template)
+  const profile = MODE_PROFILES[resolved.mode]
   const stamped = stampMinimalToolRows(composition, bootstrapTools, { winBashPath: resolved.winBashPath })
   let finalComposition = stamped.composition
   const disabledSourceRows = []
@@ -797,35 +807,36 @@ export async function generateAnchoredPreset(options) {
     guardedBundle = patchGuardedBundle(await readUtf8(resolve(options.guardCordisTools)))
     finalComposition = swapToolCordisRow(finalComposition)
   }
-  const row = buildBootstrapRow(bootstrapTools, {
+  const row = buildAnchorBootstrapRow({
+    mode: resolved.mode,
+    bootstrapTools,
     promoteOn: resolved.promoteOn,
     bootstrapMaxTokens: resolved.bootstrapMaxTokens,
-    delegationDepthExempt: resolved.delegationDepthExempt,
     suppressedContextSources: resolved.suppressedContextSources,
     suppressedContextPlugins: resolved.suppressedContextPlugins,
-    bootstrapPersonaText: resolved.bootstrapPersonaText,
+    personaText: resolved.personaText,
+    controlledPersonaText: resolved.controlledPersonaText,
     compactionTools: resolved.compactionTools,
   })
-  const whoamiRow = buildAnchorRows({
-    suppressedContextSources: resolved.suppressedContextSources,
-    suppressedContextPlugins: resolved.suppressedContextPlugins,
-    bootstrapPersonaText: resolved.bootstrapPersonaText,
-    compactionTools: resolved.compactionTools,
-  })
-  const firstRows = whoami ? whoamiRow : row
-  const companionRows = buildCompanionRows({ promoteOn: whoami ? 'assistant-message' : resolved.promoteOn })
+  const companionRows = buildCompanionRows({ promoteOn: resolved.promoteOn })
+
+  const modeDescriptions = {
+    anchored: `Anchored copy of ${source.id}: request #1 on ${describeFilter(bootstrapTools)} with the clean Minimal prompt and no injected context; after the first durable tool call or reply the promoted resident catalog keeps the bootstrap pair + discovery tools (dev_tool_search / skill_search / skill_load), and every other ${source.id} tool stays unlockable on demand. After compaction the catalog falls back to ${describeFilter(bootstrapTools)} + compactionTools until a new promotion signal.`,
+    zero: `Zero-anchored copy of ${source.id}: the first model request sees the fixed test notice on an EMPTY tool surface, the reply promotes the session, and the real message runs next turn on the resident catalog (shells + str_replace_editor + discovery tools). Other ${source.id} tools stay unlockable via dev_tool_search.`,
+    whoami: `Whoami-anchored copy of ${source.id}: the first model request sees "你是谁" on an EMPTY tool surface, the reply promotes the session, and the real message runs next turn on the resident catalog (shells + str_replace_editor + discovery tools). Subagents inherit the same anchor flow; other ${source.id} tools stay unlockable via dev_tool_search.`,
+  }
   const name = options.name ?? `${sourceName} Anchored (experimental)`
-  const description = options.description
-    ?? (whoami
-      ? `Whoami-anchored copy of ${source.id}: the first request sees a fixed self-introduction prompt on an EMPTY tool surface (upstream whoami-standard), the reply promotes the session, and the real message runs next turn on the resident catalog (${describeFilter(bootstrapTools)} + discovery tools). Subagents inherit the same anchor flow; other ${source.id} tools stay unlockable via dev_tool_search.`
-      : `Anchored copy of ${source.id}: request #1 on ${describeFilter(bootstrapTools)} with the clean Minimal prompt and no injected context; after the first durable tool call or reply the promoted resident catalog keeps the bootstrap pair + discovery tools (dev_tool_search / skill_search / skill_load), and every other ${source.id} tool stays unlockable on demand. After compaction the catalog falls back to ${describeFilter(bootstrapTools)} + compactionTools until a new promotion signal.`)
+  const description = options.description ?? modeDescriptions[resolved.mode]
   const plan = {
     sourceId: source.id,
     sourceDir: source.dir,
     id,
     targetDir,
     presetRoot,
-    whoami,
+    mode: resolved.mode,
+    firstTurnTools: profile.firstTurnTools,
+    anchorText: profile.anchorText,
+    subagents: resolved.subagents,
     bootstrapTools,
     appendedToolGroups: stamped.appended,
     toolBashDisabled: stamped.toolBashDisabled,
@@ -833,7 +844,7 @@ export async function generateAnchoredPreset(options) {
     disabledSourceRows,
     guardedCordisTools: hasCordisTool,
     winBashPath: resolved.winBashPath,
-    row: firstRows,
+    row,
     meta: { name, description, order: resolved.order },
   }
   if (options.dryRun === true) return { plan, written: false }
@@ -844,14 +855,9 @@ export async function generateAnchoredPreset(options) {
   for (const file of COMPANION_HOOK_FILES) {
     await writeFile(join(targetDir, file), await readFile(COMPANION_HOOK_SOURCES[file], 'utf8'))
   }
-  if (whoami) {
-    for (const file of ANCHOR_HOOK_FILES) {
-      await writeFile(join(targetDir, file), await readFile(ANCHOR_HOOK_SOURCES[file], 'utf8'))
-    }
-  }
   await writeFile(
     join(targetDir, COMPOSITION_FILE),
-    insertBootstrapRow(finalComposition, `${firstRows}\n\n${companionRows}`),
+    insertBootstrapRow(finalComposition, `${row}\n\n${companionRows}`),
   )
   if (guardedBundle !== undefined) {
     await writeFile(join(targetDir, GUARDED_CORDIS_FILE), guardedBundle)
@@ -872,13 +878,15 @@ const VALUE_KEYS = new Map([
   ['description', 'description'],
   ['root', 'root'],
   ['source-root', 'sourceRoot'],
+  ['mode', 'mode'],
   ['bootstrap-tools', 'bootstrapTools'],
   ['promote-on', 'promoteOn'],
   ['max-tokens', 'bootstrapMaxTokens'],
   ['order', 'order'],
   ['suppress-sources', 'suppressedContextSources'],
   ['suppress-plugins', 'suppressedContextPlugins'],
-  ['bootstrap-persona-text', 'bootstrapPersonaText'],
+  ['persona-text', 'personaText'],
+  ['controlled-persona-text', 'controlledPersonaText'],
   ['compaction-tools', 'compactionTools'],
   ['win-bash-path', 'winBashPath'],
   ['guard-cordis-tools', 'guardCordisTools'],
@@ -947,11 +955,13 @@ Options:
                             (falls back to ~/.dsh/.agent-presets).
   --source-root <dir>       Extra search root for shipped presets, e.g. the
                             harness install's apps/cli/config/agent-presets.
-  --bootstrap-tools <a,b>   Exact bootstrap tool list (the only tools while
-                            bootstrapping). Default: the Minimal pair
-                            bash,str_replace_editor (upstream PR #14); the
-                            generator stamps the Minimal tool groups when the
-                            source preset lacks them.
+  --mode <mode>             anchored | zero | whoami. Default from
+                            template/defaults.json (currently anchored).
+  --whoami                  Alias for --mode whoami.
+  --bootstrap-tools <a,b>   Exact minimal pair used by the anchored profile and
+                            stamped as the Minimal tool groups when the source
+                            preset lacks them. Default: bash,str_replace_editor
+                            (upstream PR #14).
   --guard-cordis-tools <path>
                             Deployed dsh-tool-cordis bundle to copy+patch into
                             the target. REQUIRED when the source mounts
@@ -963,49 +973,37 @@ Options:
                             in EITHER order (old native cordis sessions keep
                             working — their preset mount no longer fails).
   --promote-on <mode>       either | tool-call | assistant-message.
-                            Default: either (upstream flow). Request #1 sees
-                            only the bootstrap pair; after the first durable
-                            tool call or reply the promoted resident catalog
-                            (bootstrap pair + dev_tool_search / skill_search /
-                            skill_load) is exposed, and every other source
-                            tool is one dev_tool_search away. After
-                            compaction the catalog falls back to bootstrap +
-                            --compaction-tools until a new signal.
-  --max-tokens <n>          OPT-IN first-request maxTokens cap. Omit to run at
-                            the adapter default (upstream issue #11).
+                            Only valid for --mode anchored; zero/whoami are
+                            fixed to assistant-message (the anchor reply).
+  --max-tokens <n>          OPT-IN controlled-phase maxTokens cap for every
+                            mode. Omit to run at the adapter default.
   --order <n>               Preset order. Default: 5.
   --suppress-sources <a,b>  Controlled-phase context kinds to strip; empty list
                             disables.
   --suppress-plugins <a,b>  Messages from these source.plugin names are
                             stripped on EVERY request (default: the runtime
                             snapshot); empty list disables.
-  --bootstrap-persona-text <text>
-                            Clean Minimal persona kept for the WHOLE session
-                            (controlled and promoted phases alike, upstream
-                            complete-persona parity); the source persona is
-                            never restored, because restoring it pulled later
-                            rounds back to the standard trajectory.
+  --persona-text <text>     Full persona after promotion (base + We-need opener
+                            + dev_tool_search unlock guidance).
+  --controlled-persona-text <text>
+                            Persona while controlled / on the anchor turn
+                            (base + We-need opener, no tool guidance).
   --compaction-tools <a,b>  Core work set exposed after compaction/end before
                             re-promotion. Default from template/defaults.json.
   --win-bash-path <path>    Git Bash executable for the Windows custom-bash
                             row. Default: C:\\Program Files\\Git\\bin\\bash.exe.
-  --whoami                  Use the upstream whoami-standard anchor flow:
-                            first request = fixed self-introduction on an
-                            EMPTY tool surface; the reply promotes the session
-                            and the real message runs next turn on the
-                            resident catalog. Subagents inherit the same
-                            anchor flow (includeSubagents: true).
-  --bootstrap-subagents     Also bootstrap subagent sessions. Default: exempt.
+  --bootstrap-subagents     anchored only: subagents also take the minimal
+                            bootstrap phase instead of starting resident.
   --dry-run                 Print the plan without writing anything.
   --help                    Show this help.
 
-Promotion and suppression defaults come from template/defaults.json.
-Modes: default anchored, or --whoami for the anchor-turn flow. The full mode
-matrix and per-hook reference live in template/hook/README.md.
+Defaults come from template/defaults.json. The unified anchor-bootstrap row
+replaces the old tool-bootstrap / zero-tool-bootstrap / anchor-turn rows; the
+full mode matrix lives in template/hook/README.md.
 Examples:
-  node tools/make-anchored-preset.mjs --from "$DSH_HOME/.agent-presets/standard" --to standard-anchored
   node tools/make-anchored-preset.mjs --from standard --to standard-anchored
-  node tools/make-anchored-preset.mjs --from minimal --to minimal-anchored
+  node tools/make-anchored-preset.mjs --from standard --to standard-zero --mode zero
+  node tools/make-anchored-preset.mjs --from standard --to standard-whoami --mode whoami
 `
 
 const isMain = process.argv[1] !== undefined
@@ -1020,8 +1018,8 @@ if (isMain) {
       const result = await generateAnchoredPreset(options)
       const { plan } = result
       process.stdout.write(`${result.written ? 'created' : 'would create'} preset "${plan.id}" in ${plan.targetDir}\n`)
+      process.stdout.write(`mode: ${plan.mode} (firstTurnTools ${plan.firstTurnTools}, anchorText ${plan.anchorText}, subagents ${plan.subagents})\n`)
       process.stdout.write(`bootstrap tools: ${plan.bootstrapTools.join(', ')}\n`)
-      if (plan.whoami) process.stdout.write('anchor flow: anchor-turn (whoami text; zero-tool first turn; subagents inherit it)\n')
       if (plan.appendedToolGroups.length > 0) process.stdout.write(`appended groups: ${plan.appendedToolGroups.join(', ')}\n`)
       if (plan.toolBashDisabled) process.stdout.write('disabled standard tool-bash (persistent bash owns the bash name)\n')
       if (plan.disabledSourceRows.length > 0) process.stdout.write(`disabled source rows: ${plan.disabledSourceRows.join(', ')} (replaced by the upstream on-demand discovery flow)\n`)

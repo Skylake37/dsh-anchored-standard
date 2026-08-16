@@ -1,7 +1,8 @@
 # 三模式合并分析：原子机理交叉分类
 
-> 状态：分析稿，未实现。目标是把 `anchored` / `zero` / `whoami` 三种模式从
-> “三个 preset 目录 + 两个 gate 插件”收敛为一个可配置的 gate 插件。
+> 状态：契约已定，代码已实现（`template/hook/anchor-bootstrap.mjs` +
+> 生成器单 hook 输出 + 测试 148/148）。剩余：真机验证 zero/whoami 全链条、
+> 重新生成全部安装态、完全重启 DSH。
 >
 > 基线：`upstream/main = db4527a`，本地 `agent-dev` 基线为含 persona 主动
 > 解锁/工具偏好句的版本（提交 `81dcb10`，后经 `ce6fbdc` 合并）。
@@ -118,14 +119,15 @@ profile 暴露。
     bootstrapTools: [bash, str_replace_editor]
     promoteOn: either                # anchorText != none 时强制 assistant-message
 
+    # persona（阶段感知，A'）：受控/锚定回合用 controlledPersonaText，
+    # 晋升后用 personaText（= controlledPersonaText + 工具解锁/偏好句）。
+    controlledPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need."
+    personaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."
+
     # 共享参数
     suppressedContextSources: [agent-instructions, skill-catalog]
     suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt']
-    persona:
-      base: "You are a helpful software engineer assistant."
-      opener: "When working on a task, always open your reasoning with We need."
-      toolGuide: "If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names. Before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists."
-    bootstrapMaxTokens:              # opt-in；待决
+    bootstrapMaxTokens:              # opt-in；全模式可用（用户已确认）
     compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
 ```
 
@@ -181,53 +183,65 @@ profile 暴露。
 - 当前会话（含本 session）已观察到全程 `we …` 形态，可作为参考基线；
   anchor turn persona A' 是否影响首链，需要真机验证。
 
-## 7. 待决项（机理说明，等用户决定）
+## 7. 已决项（用户最终决定）
 
-### 待决项 4：`bootstrapMaxTokens` 是否扩展到 `firstTurnTools: empty`
+### 7.1 `bootstrapMaxTokens` 扩展为全模式共用选项
 
-当前机理：
+- 合并后的单一 gate 对 `firstTurnTools: empty | minimal` **都支持**
+  `bootstrapMaxTokens`（opt-in，缺省仍不 cap）。
+- 语义不变：受控期注入 cap；`status.promoted` 后若当前 proposal 仍等于该
+  cap，显式剥掉，防止 seed proposal 继承。
+- 对 zero / whoami 而言，cap 作用于 anchor 请求；anchor 回复晋升后，用户
+  真实消息的请求自动恢复无 cap。
 
-- 只有 `tool-bootstrap.mjs` 实现了 cap：`agent/request` 上 `prepend` 一个
-  监听器，受控期强制 `maxTokens = bootstrapMaxTokens`；`status.promoted`
-  后，若当前 proposal 仍等于该 cap，就**显式剥掉**，防止下一条请求的 seed
-  proposal 继承 cap。
-- `zero-tool-bootstrap.mjs` 没有这段代码，所以 zero / whoami 完全没有 cap。
-- 合并后实现成本很低，语义可以是：
-  - anchor 请求（0 工具、短 prompt）也吃 cap；
-  - anchor 回复一旦晋升，真实任务请求自动剥掉 cap。
-- 需要决定的是要不要给 anchor 请求 cap，以及 cap 会不会改变 zero 首链。
-  这不是合并的阻塞项，可以合并后再补。
+### 7.2 旧 hook 文件 clean cut
 
-### 待决项 5：合并后旧 `zero-tool-bootstrap.mjs` 删除还是留兼容层
+- `template/hook/tool-bootstrap.mjs`、`zero-tool-bootstrap.mjs`、
+  `anchor-turn.mjs` 三个下游文件删除，由单一 `anchor-bootstrap.mjs` 取代。
+- 不留兼容 shim。依据：安装态 preset 目录自包含（旧副本继续可用），且用户
+  已决定所有安装态全部重新生成。
+- 上游自有副本（`shared/`、三个上游 mode 目录）不动，继续由上游 sync 管理。
 
-机理背景：
+### 7.3 最终 config 契约（实现目标）
 
-- DSH preset 是**目录级自包含**的：`agent.cordis.yml` 里的
-  `name: ./zero-tool-bootstrap.mjs` 指向该 preset 自己目录里的文件。生成器
-  在生成时把 hook 复制进去，之后安装态与 template 目录**没有运行时依赖**。
-- 因此删除 `template/hook/zero-tool-bootstrap.mjs` / `anchor-turn.mjs` 不会
-  弄坏任何已生成的安装态——它们手里有旧文件的独立副本。
-- 若留兼容层，一般做法是保留旧文件名，`export { apply } from
-  './anchor-bootstrap.mjs'` 再映射旧 config。但旧 zero/whoami 的
-  `agent.cordis.yml` 里是**两行**（`zero-tool-bootstrap` + `anchor-turn`），
-  合并后的插件是**一行**；薄 shim 无法自动让旧两行变成一行，反而可能造成
-  anchor 双注入（shim 注入一次 + 旧 `anchor-turn` 行再注入一次）。
-- 结论倾向：**不留 shim，clean cut**。理由：
-  1. 用户已决定所有安装态重新生成；
-  2. 旧安装态即使不重新生成也能用（自带旧文件副本），只是不享受新契约；
-  3. shim 面对旧两行配置需要额外迁移逻辑，复杂度大于收益；
-  4. 上游自有副本（`shared/`、三个上游 mode 目录）不能动，继续由上游 sync
-     管理；我们只清理 `template/hook/` 这个下游源。
-- 若用户还有“某个旧 preset 不想重新生成但想要新插件”，那才需要兼容层；
-  目前看不存在这种对象。
+```yaml
+- id: anchor-bootstrap
+  name: ./anchor-bootstrap.mjs
+  config:
+    mode: anchored | zero | whoami     # 命名 profile 糖
+    firstTurnTools: empty | minimal
+    anchorText: none | test-notice | whoami
+    subagents: resident | bootstrap | anchor
 
-## 8. 建议实施顺序
+    bootstrapTools: [bash, str_replace_editor]   # firstTurnTools=minimal 时使用
+    promoteOn: either | tool-call | assistant-message  # anchorText != none 强制 assistant-message
 
-1. 按第 7 节两个待决项拍板；
-2. 定最终 config 契约（含 persona 三段拆分）；
-3. 写 `anchor-bootstrap.mjs`，用三个 profile 的单元测试对齐现有行为；
-4. 生成器改为单 hook 输出 + `--mode zero|whoami|anchored` 别名；
-5. `npm test` / `npm run check`；
-6. 真机验证 `zero` 与 `whoami` 全链条（用户侧），重点看 anchor turn 的
-   persona A' 与 cap 决策；
+    controlledPersonaText: "base + opener"
+    personaText: "base + opener + unlock指引 + 工具偏好"
+
+    bootstrapMaxTokens: <positive int | 省略>   # 全模式 opt-in
+    suppressedContextSources: [agent-instructions, skill-catalog]
+    suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt']
+    compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
+```
+
+白名单校验：
+
+- `mode` 提供默认值；显式 `firstTurnTools/anchorText/subagents` 与 `mode`
+  冲突时 fail-loud；
+- `anchorText == none` 只允许 `firstTurnTools: minimal`；
+- `anchorText != none` 只允许 `firstTurnTools: empty`，且 `promoteOn` 强制
+  `assistant-message`；
+- `subagents`：`bootstrap` 只允许 anchored；`anchor` 只允许 whoami；
+  `resident` 全模式合法。
+
+## 8. 实施顺序（已确认）
+
+1. ~~拍板待决项~~ ✅（7.1 / 7.2）
+2. ~~写 `anchor-bootstrap.mjs` + profile 单元测试~~ ✅
+3. ~~生成器改为单 hook 输出 + `--mode anchored|zero|whoami`~~ ✅
+   （`--whoami` 作为 `--mode whoami` 兼容别名保留）
+4. ~~删除旧下游 hook 与旧测试~~ ✅（clean cut）
+5. ~~`npm test` / `npm run check`~~ ✅（148/148）
+6. 真机验证 `zero` 与 `whoami` 全链条（用户侧），重点看 persona A' 与 cap；
 7. 重新生成全部安装态（含 matlab-anchored），完全重启 DSH。

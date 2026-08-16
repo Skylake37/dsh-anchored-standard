@@ -1,131 +1,103 @@
 # Anchor Hook Template
 
-把上游 `preset/` 里的 anchored 机制做成**可复用的模板**：不修改任何上游文件，
-只向现有 preset 上“套壳”，生成 `<preset>-anchored` 变体。所有下游自有文件都
-集中在 `template/` 和 `tools/` 两个目录，上游合并不会碰它们。
+把上游 anchored 机制做成**可复用的模板**：不修改任何上游文件，只向现有
+preset 上“套壳”，生成 `<preset>-anchored` 变体。所有下游自有文件集中在
+`template/` 和 `tools/` 两个目录，上游合并不会碰它们。
 
-下游默认跟随**上游最新流程**（PR #14 锚定 + PR #27 晋升后 resident 目录 +
-custom-bash + instruction-hint/skill-search/dev-tool-search + compaction
-epoch）：请求 #1 只有 Minimal 工具对；晋升后**在正确时刻**开放 resident 目录
-（bootstrap 工具对 + 三个发现工具），源 preset 的其余工具通过
-`dev_tool_search` 按需解锁——既不是全程只有两个工具，也不是晋升时一次性
-倾倒完整目录（那会拉回 standard 轨迹）。
+当前下游 hook 已合并为**一个 gate 插件** `anchor-bootstrap.mjs`，取代旧的
+`tool-bootstrap` / `zero-tool-bootstrap` / `anchor-turn` 三件套。三种模式只是
+同一个 hook 的三种 profile。
 
 ## 支持哪些模式
 
-hook 套件目前组合出三种模式，生成器 CLI 暴露前两种；第三种与上游
-`zero-anchored-standard` 同构，hook 已支持，只是还没做独立开关。每个 hook
-具体干什么、适用哪种模式见 [`hook/README.md`](./hook/README.md)。
-
-| 模式 | 生成器入口 | 首模型请求 | 锚定插件 | 晋升信号 | 子代理 |
+| mode | `firstTurnTools` | `anchorText` | `subagents` | 首模型请求 | 晋升信号 |
 |---|---|---|---|---|---|
-| anchored（默认） | 默认 | `bash + str_replace_editor` | `tool-bootstrap` | 首个持久 `tool/call` 或 `assistant/message`（`promoteOn` 可配） | 默认跳过 bootstrap（`--bootstrap-subagents` 反转） |
-| whoami | `--whoami` | 0 工具 + `anchor-turn(text: 你是谁)` | `anchor-turn` + `zero-tool-bootstrap` | anchor 回复（`assistant/message`） | 继承 anchor（`includeSubagents: true`） |
-| zero-anchor | 尚未暴露 CLI（同一组 hook 可用 `buildAnchorRows` 组合） | 0 工具 + `anchor-turn` 默认测试句 | `anchor-turn` + `zero-tool-bootstrap` | anchor 回复（`assistant/message`） | 默认跳过（`includeSubagents: false`） |
+| `anchored`（默认） | `minimal` | `none` | `resident`（可 `bootstrap`） | `bash + str_replace_editor` | 首个持久 `tool/call` 或 `assistant/message`（`promoteOn` 可配） |
+| `zero` | `empty` | `test-notice` | `resident` | 0 工具 + 固定测试句 | anchor 回复（`assistant/message`） |
+| `whoami` | `empty` | `whoami` | `anchor` | 0 工具 + `你是谁` | anchor 回复（`assistant/message`） |
+
+三种模式的后半段完全一致：晋升后都是 **resident 目录**（模式基集 +
+`dev_tool_search` / `skill_search` / `skill_load` + 已解锁工具），
+`compaction/end` 后按 epoch 回落，绝不是全量目录 dump。原子机理交叉分类见
+[`research/mode-merge-analysis.md`](./research/mode-merge-analysis.md)，逐
+hook 职责与配置键见 [`hook/README.md`](./hook/README.md)。
 
 ## 文件布局
 
 ```
 template/
-  hook/tool-bootstrap.mjs   # 可复用主钩子（生成时复制进每个目标 preset）
-  hook/compaction-epoch.mjs # epoch-aware 晋升状态机（tool-bootstrap/instruction-hint 共用）
-  hook/instruction-hint.mjs # 晋升后一次性的 AGENTS.md 存在性提示（替代全量注入）
-  hook/dev-tool-search.mjs  # 按需工具发现/解锁
-  hook/skill-search.mjs     # skill_search / skill_load（替代完整技能目录注入）
-  hook/custom-bash.mjs      # Windows Git Bash 工具（普通子进程 seam，无 PTY）
-  hook/anchor-turn.mjs      # 零工具 anchor-turn（whoami/zero 共用，text 决定口味）
-  hook/zero-tool-bootstrap.mjs # anchor-turn 模式：零工具首请求 + resident 目录
-  hook/README.md            # 每个 hook 的职责、配置键、适用模式
-  defaults.json             # 下游自有参数，合并上游后在这里同步参数
-  README.md                 # 本说明
+  hook/anchor-bootstrap.mjs  # 唯一 gate：模式 profile + 工具门 + anchor 注入 + persona + cap
+  hook/compaction-epoch.mjs  # epoch-aware 晋升状态机（anchor-bootstrap/instruction-hint 共用）
+  hook/instruction-hint.mjs  # 晋升后一次性 AGENTS.md 存在性提示
+  hook/dev-tool-search.mjs   # 按需工具发现/解锁（本地增强版）
+  hook/skill-search.mjs      # skill_search / skill_load
+  hook/custom-bash.mjs       # Windows Git Bash（普通子进程 seam，无 PTY）
+  hook/README.md             # 每个 hook 的职责、配置键、适用模式
+  defaults.json              # 下游自有参数，合并上游后在这里同步
+  README.md                  # 本说明
 tools/
-  make-anchored-preset.mjs  # 一键套壳生成器（零依赖 Node ESM）
+  make-anchored-preset.mjs   # 一键套壳生成器（零依赖 Node ESM）
 ```
 
 生成器会：
 
-1. 把源 preset 目录整体复制到 `$DSH_HOME/.agent-presets/<to>`（默认
-   `<source>-anchored`）；
-2. 把 `template/hook/` 下的钩子插件复制进目标；
-3. 在目标 `agent.cordis.yml` 的**第一行 entry 之前**插入 bootstrap 行
+1. 把源 preset 目录整体复制到 `$DSH_HOME/.agent-presets/<to>`；
+2. 把 `anchor-bootstrap.mjs` 及伴生 hooks 复制进目标；
+3. 在目标 `agent.cordis.yml` 第一行 entry 之前插入 `anchor-bootstrap` 行
    （保持“先注册 → pre-step 剥离是最后一层 waterfall 变换”的顺序契约），
    以及 `instruction-hint` + `dev-tool-search` + `skill-search` 伴生行；
-4. 若源 preset 没有 Minimal 工具对（persistent `bash` +
-   `str_replace_editor`），追加 `persistent-shell` 和
+4. 若源 preset 没有 Minimal 工具对，追加 `persistent-shell` 和
    `bootstrap-filesystem` 两个 group；同时禁用标准 `tool-bash` 行，避免
-   `bash` 工具名注册两次（上游 PR #14 的做法）；
-5. **Windows 上**：`persistent-shell` 组禁用（DSH PTY 后端无 win32），改为
-   `custom-bash` 行（Git Bash 普通子进程，默认
-   `C:\Program Files\Git\bin\bash.exe`，`--win-bash-path` 可覆盖）——`bash`
-   工具在 Windows 上真实可执行；
-6. 禁用源 preset 的 `agent-instructions` / `tool-skill` 行，由
-   `instruction-hint` / `skill-search` 接管（上游同款）；
+   `bash` 工具名注册两次；
+5. **Windows 上**：`persistent-shell` 组禁用，改为 `custom-bash` 行；
+6. 禁用源 preset 的 `agent-instructions` / `tool-skill` 行；
 7. 改写目标的 `preset.yml`（name/description/order）。
 
-## 当前 anchor 参数（上游 PR #14 / issue #11 + 上游最新 resident 流）
+## 统一 gate 的关键参数
 
-- `bootstrapTools: [bash, str_replace_editor]`：**官方 Minimal preset 的真实
-  工具对**。issue #11 实测该 schema 在 adapter 默认 maxTokens（256000）下
-  5/5 锚定，而所有 standard 家族 schema 11/11 落入 standard 行为。
-- `promoteOn: either`（默认）：首个持久 `tool/call` 或
-  `assistant/message` 晋升；`tool-call` / `assistant-message` 可选。
-- **晋升后 resident 目录**：`bootstrapTools` + `dev_tool_search` +
-  `skill_search` + `skill_load` + 模型通过 `dev_tool_search` 显式解锁的
-  工具（从持久 `tool/call` 事件推导，重载安全）。**不是**完整目录一次性
-  倾倒——完整目录会把轨迹拉回 standard 风格；**也不是**永远只有两个工具。
-- `compactionTools: [read, write, edit, glob, grep, todo_write,
-  ask_user_question]`：`compaction/end` 之后回落到 bootstrap 对 +
-  compactionTools，直到边界之后出现**新的**晋升信号（epoch-aware）。
-- `bootstrapMaxTokens`：**opt-in**。默认不写这一行 → 首请求走 adapter 默认
-  maxTokens，不 cap；显式 `--max-tokens` 才注入 cap（`prepend` 注册，晋升
-  后显式剥离；compaction 重置后再次生效）。
-- `suppressedContextSources: [agent-instructions, skill-catalog]`：受控阶段
-  剥离自动注入的 AGENTS.md 摘要和技能目录；空数组关闭剥离。
-- `suppressedContextPlugins: [@deepseek-ai/dsh-system-prompt]`：**每个请求**
-  都剥离运行时上下文快照消息（等价上游 persona 行的
-  `includeRuntimeContext: false`）。
-- `bootstrapPersonaText`（下游扩展）：把 system prompt 收敛成**只有 persona
-  一节**——harness 身份块、Web 朝向、工具指引、运行时快照小节全部去掉，等价于
-  上游 anchored preset 的 `complete` persona 效果。默认文本在上游 Minimal
-  原句后追加两句：opener 约束（`When working on a task, always open your
-  reasoning with We need.`，本机实测首链稳定 "We need understand…"）和工具
-  解锁指引（`If a tool you need is not in your current tool list, do not
-  conclude it is unavailable: after your first tool call, call dev_tool_search
-  with no query to list every unlockable tool, then unlock the exact names.`）
-   和“优先专用工具”行为提示（`Before doing work with bash or
-   str_replace_editor, check dev_tool_search for a purpose-built tool and
-   prefer it whenever one exists.`，针对模型能解锁却死磕 shell 的问题）。
-  如需恢复上游逐字节原句，生成时
-  `--bootstrap-persona-text "You are a helpful software engineer assistant."`。
-  该 persona 保持**整个 session**（晋升后不恢复源 persona）。
-- `dev_tool_search`（本地增强）：**不传 query（或 `query:"*"`）列出全部可解锁
-  工具名**；单关键词搜索用 OR 评分（多词不再返回空）；`toolNames` 解锁时会
-  校验名字并明确报告 unknown names——避免模型“搜不到就以为工具不存在”。
-- `delegationDepthExempt: true`：子 agent 默认跳过 bootstrap、直接进入
-  resident 目录（同样保持干净 persona 与解锁提示）；`--bootstrap-subagents`
-  让子代理也走受控阶段。
+- `mode: anchored | zero | whoami`：命名 profile 糖；显式
+  `firstTurnTools` / `anchorText` / `subagents` 必须与 mode 匹配，冲突 fail
+  loud。
+- `firstTurnTools: empty | minimal`：请求 #1 工具面。
+- `anchorText: none | test-notice | whoami`：合成 anchor turn 文本。
+  - `test-notice` 当前文本：`This round is a test. Tools are not open yet; all tools will open next round.`
+  - `whoami` 当前文本：`你是谁`
+- `subagents: resident | bootstrap | anchor`：
+  - `resident`：子代理直接进 resident；
+  - `bootstrap`：仅 anchored，子代理也走 minimal 受控期（`--bootstrap-subagents`）；
+  - `anchor`：仅 whoami，子代理也走 anchor turn。
+- `bootstrapTools`：仅 `firstTurnTools: minimal` 使用，默认 Minimal 真实对
+  `bash + str_replace_editor`。
+- `promoteOn`：anchored 可配 `either` / `tool-call` / `assistant-message`；
+  zero / whoami 固定 `assistant-message`（anchor 回复）。
+- `bootstrapMaxTokens`：**全模式 opt-in**。受控请求注入 cap，晋升后显式剥离，
+  防止 seed proposal 继承。
+- `suppressedContextSources`：受控期剥离自动注入的 AGENTS.md / skill-catalog。
+- `suppressedContextPlugins`：**每个请求**剥离指定插件消息（默认运行时快照）。
+- `controlledPersonaText`：受控期 / anchor turn 的 persona（base + We-need
+  opener，不提工具解锁）；`personaText`：晋升后的完整 persona（再加
+  dev_tool_search 解锁指引 + 专用工具偏好句）。
+- `compactionTools`：`compaction/end` 后回落的工作集。
 
 ## 快速开始
 
 ```sh
-# Standard / Code / Cordis：自动检测，并自动补 Minimal 工具组 + 禁用 tool-bash
-node tools/make-anchored-preset.mjs \
-  --from "$DSH_HOME/.agent-presets/standard" \
-  --to standard-anchored
+# anchored（默认）：首请求 Minimal 工具对
+node tools/make-anchored-preset.mjs --from standard --to standard-anchored
 
-# 从 harness 安装目录直接套壳 shipped preset：
-node tools/make-anchored-preset.mjs \
-  --from /path/to/dsh/apps/cli/config/agent-presets/standard \
-  --to standard-anchored
+# zero：首请求 0 工具 + 固定测试句
+node tools/make-anchored-preset.mjs --from standard --to standard-zero --mode zero
+
+# whoami：首请求 0 工具 + 你是谁；--whoami 是旧别名
+node tools/make-anchored-preset.mjs --from standard --to standard-whoami --mode whoami
+# 或
+node tools/make-anchored-preset.mjs --from standard --to standard-whoami --whoami
 
 # Cordis / 创造模式（进程级 Inspect provider，必须给守卫 bundle）：
 node tools/make-anchored-preset.mjs \
   --from /path/to/dsh/apps/cli/config/agent-presets/cordis \
   --to creative-anchored \
   --guard-cordis-tools /path/to/dsh/apps/cli/node_modules/@deepseek-ai/dsh-tool-cordis/lib/index.js
-
-# whoami-standard 流（anchor-turn 文本=你是谁；零工具预热回合，子代理也继承该锚定）：
-node tools/make-anchored-preset.mjs --from standard --to standard-whoami --whoami
 
 # 干跑，只打印计划：
 node tools/make-anchored-preset.mjs --from standard --to standard-anchored --dry-run
@@ -138,87 +110,46 @@ node tools/make-anchored-preset.mjs --from standard --to standard-anchored --dry
 
 导出 session JSONL，检查 `request/header`：
 
-- 第一个 header 只有 `bash` + `str_replace_editor`，且 system prompt 只有
-  Minimal persona 一句（无 harness 身份块/工具指引/运行时快照小节）；
-- 首个持久 `tool/call` 或 `assistant/message` 之后，下一个 header 变为
-  resident 目录：`bash`、`str_replace_editor`、`dev_tool_search`、
-  `skill_search`、`skill_load`（以及已解锁工具），**不是**完整目录；
-- 调一次 `dev_tool_search({"toolNames":["read"]})` 后，再下一个 header 应
-  出现 `read` 并持续保留；
-- `compaction/end` 后 header 回落到 `bash` + `str_replace_editor` +
-  `compactionTools`，直到新的晋升信号；
-- Windows 上 header 的 `bash` 描述来自 `custom-bash`（Git Bash），且
-  `bash -c 'echo hi'` 真实返回输出。
+- `anchored`：第一个 header 只有 `bash` + `str_replace_editor`；system prompt
+  只有 `controlledPersonaText`（base + We-need opener）；
+- `zero` / `whoami`：第一个 header 工具为空，消息面只有合成 anchor；
+- 晋升后：resident 目录出现（模式基集 + 三个发现工具 + 已解锁工具），
+  **不是**完整目录，persona 切换为完整 `personaText`；
+- 调一次 `dev_tool_search({"toolNames":["read"]})` 后，下一个 header 应出现
+  `read` 并持续保留；
+- `compaction/end` 后回落到模式基集 + `compactionTools`，直到新晋升信号；
+- Windows 上 `bash` 描述来自 `custom-bash`，且真实可执行。
 
 也可用 `node verify/run-verify.mjs --preset <id> --task "..." --stop-after-first-assistant`
-在独立 headless 进程里对真实端点做一次性校验（打印每个 request/header 的
-工具面与首个 assistant message 的 reasoning）。
+做一次性真机校验。
 
 ## 与上游合并的流程
 
-上游 `preset/`、`README*`、`test/` 的改动由 `Sync upstream` workflow 自动
-rebase 进 `main` 并合并进 `agent-dev`（每 15 分钟 + 手动 dispatch）。手动
-同步命令：
-
-```sh
-git fetch upstream
-git switch main
-git pull --ff-only origin main
-git rebase upstream/main
-git push --force-with-lease origin main
-git switch agent-dev
-git merge main
-git push origin agent-dev
-```
+上游 `preset/`、`README*`、`test/`、`shared/` 的改动由 `Sync upstream`
+workflow 自动 rebase 进 `main` 并合并进 `agent-dev`。手动同步命令同
+AGENT.md。
 
 ### 合并后必做：同步参数
 
-上游实验一旦调整参数（例如 PR #10 的可配置 `suppressedContextSources`、
-PR #14 的 Minimal 工具对、PR #27 的 resident/compaction 流），**不要直接改
-代码**，先对照下面的映射：
-
 | 上游位置 | 下游位置 |
 |---|---|
-| `preset/agent.cordis.yml` 的 `bootstrapTools` | 生成器默认检测/写入逻辑（`MINIMAL_BOOTSTRAP_TOOLS` 与 `detectBootstrapTools`） |
-| `preset/agent.cordis.yml` 的 `promoteOn` | `template/defaults.json` → `promoteOn`（默认 `either`） |
-| `preset/agent.cordis.yml` 的 `compactionTools` | `template/defaults.json` → `compactionTools` |
-| `preset/agent.cordis.yml` 的 `bootstrapMaxTokens`（现在默认不设） | 生成器 opt-in 语义；默认不写该行 |
-| `preset/agent.cordis.yml` 的 `suppressedContextSources` | `template/defaults.json` → `suppressedContextSources` |
-| `preset/tool-bootstrap.mjs` 的 resident 集合 / 解锁 / epoch 语义 | `template/hook/tool-bootstrap.mjs` + `template/hook/compaction-epoch.mjs`（手动对照同步） |
-| `preset/{instruction-hint,dev-tool-search,skill-search,custom-bash}.mjs` | `template/hook/` 同名文件（手动对照同步） |
-| `shared/{zero-tool-bootstrap,anchor-turn}.mjs`（whoami/zero 两模式共用） | `template/hook/` 同名文件（`zero-tool-bootstrap` 的 import 改为 `./compaction-epoch.mjs`） |
-| 插件对 `agent/pre-step` / `agent/request` 的 `prepend` 与降级语义 | `template/hook/tool-bootstrap.mjs`（手动对照同步） |
+| `preset/agent.cordis.yml` 的 `bootstrapTools` / `promoteOn` / `compactionTools` | `template/defaults.json` + 生成器 `MODE_PROFILES` |
+| `preset/tool-bootstrap.mjs` 的 resident / epoch / 解锁语义 | `template/hook/anchor-bootstrap.mjs`（本地为超集） |
+| `shared/{compaction-epoch,custom-bash,dev-tool-search,instruction-hint,skill-search}.mjs` | `template/hook/` 同名文件（`dev-tool-search` 本地增强） |
+| `shared/zero-tool-bootstrap.mjs` + `shared/anchor-turn.mjs` | 已合并进 `template/hook/anchor-bootstrap.mjs`（不再有旧三件套） |
+| 插件对 `agent/pre-step` / `agent/request` 的 `prepend` 与降级语义 | `template/hook/anchor-bootstrap.mjs` |
 
-改完后重跑测试并重新生成 preset：
-
-```sh
-npm test
-node tools/make-anchored-preset.mjs --from standard --to standard-anchored
-```
+改完重跑 `npm test` / `npm run check` 并重新生成安装态。
 
 ## 约束与取舍
 
-- 生成器对“无法自动确定小工具面”的源 preset **fail loud**，不会静默产出
-  一个首请求不锚定的 preset；这时必须给 `--bootstrap-tools`。
-- 源 preset 已有 `tool-bootstrap` / `zero-tool-bootstrap` 行时拒绝套壳。
-- 晋升后不是完整目录：resident 目录 + `dev_tool_search` 按需解锁是上游
-  PR #27 的用户实测结论。若确需两阶段旧行为（晋升即完整目录），不要在
-  hook 上改回全量——那会拉回 standard 轨迹。
-- **Windows 上不要用 PTY persistent bash**：本机 DSH 构建无 win32 PTY 后端
-  （`subprocess-local: terminal inspection is unsupported on platform win32`）。
-  生成器自动改用 `custom-bash`（普通子进程 Git Bash）；`--win-bash-path`
-  指向实际安装路径。
-- 钩子运行时对缺失 bootstrap 工具 fail-open（警告一次后暴露完整目录），
-  不会 brick session。
-- 源 preset 若注册进程级全局服务（如 cordis 的 `tool-cordis` 向 `cordisInspect`
-  注册 Inspect provider），直接套壳会让副本与源 preset 在同一 DSH 进程只能
-  挂载其一。此时必须给
-  `--guard-cordis-tools <path>`（指向部署包的
-  `<harness>/apps/cli/node_modules/@deepseek-ai/dsh-tool-cordis/lib/index.js`）：
-  生成器会把该 bundle 复制进目标并打上两层守卫补丁、把行换成
-  本地 `./tool-cordis-guarded.mjs`，工具与原版逐字节等价：
-  1. 自身注册遇“already registered”时共享跳过；
-  2. 向共享注册表的 `register` 安装进程级容错包装——之后任何 cordis 家族
-     preset（包括原版）重复注册都变成共享 no-op，**任意挂载顺序都共存**。
-- 生成的 preset 与 shell 同信任级；请审阅 `template/hook/tool-bootstrap.mjs`
+- 生成器对无法确定 Minimal 工具对的源 preset **fail loud**，要求显式
+  `--bootstrap-tools`。
+- 源 preset 已挂 `anchor-bootstrap` / `tool-bootstrap` /
+  `zero-tool-bootstrap` 时拒绝套壳。
+- 晋升后不是完整目录；resident + `dev_tool_search` 按需解锁是实测结论。
+- **Windows 上不要用 PTY persistent bash**，生成器自动改用 `custom-bash`。
+- hook 对缺失 phase 工具 fail-open（警告后暴露完整目录），不会 brick session。
+- 含 `tool-cordis` 的源 preset 必须给 `--guard-cordis-tools`，否则 fail loud。
+- 生成的 preset 与 shell 同信任级；请审阅 `template/hook/anchor-bootstrap.mjs`
   后再套用。
