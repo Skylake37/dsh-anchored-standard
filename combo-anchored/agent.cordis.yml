@@ -5,7 +5,7 @@
 # one row of this file:
 #
 #   think-phase       every user turn opens with ONE zero-tool THINK step
-#                     (the A1 condition on the real message); steering then
+#                     (the zero-tool condition on the real message); steering then
 #                     opens the resident catalog for EXECUTE.
 #   deliberation-gate a trajectory-depth gate denies the FIRST tool call of
 #                     any shallow turn (below minChars of streamed
@@ -15,13 +15,13 @@
 #
 # The three cover different moments of a turn: think-phase owns the OPENING,
 # the gate owns the FIRST ACTION of turns that skipped deep thought, and the
-# drip owns the LONG MIDDLE of tool loops. Together they attack the measured
-# collapse (A3: ~164 pre-tool chars on a callable catalog) at every phase
-# boundary while the session keeps ordinary Standard tool usage.
+# drip owns the LONG MIDDLE of tool loops. Together they attack the pre-tool
+# deliberation collapse at every phase boundary while the session keeps
+# ordinary Standard tool usage.
 #
-# Swap the `think-phase` row for `a4-think` + `a4-adapter` (see the
-# a4-think-standard preset) to upgrade the opening to the wire-level A4
-# condition (tools + tool_choice=none) at the cost of a sibling provider
+# Swap the `think-phase` row for `wire-think` + `toolchoice-adapter` (see the
+# wire-think-standard preset) to upgrade the opening to the wire-level
+# condition (tools visible + tool_choice=none) at the cost of a sibling provider
 # route and its prefix-cache churn.
 #
 # This file is an AGENT-PLANE composition. The roster mounts it ONCE under a
@@ -60,9 +60,8 @@
 # transform of the assemble/pre-step waterfalls.
 #
 # V4 Pro conditions strongly on the API tool catalog: a callable catalog
-# collapses deliberation before the first tool call (community cell A3,
-# ~164 CoT chars), while a zero-tool request anchors the deep "We" chain
-# (cell A1, ~1501 chars). So EVERY user turn opens with one zero-tool think
+# collapses deliberation before the first tool call, while a zero-tool
+# request anchors the deep "We" chain. So EVERY user turn opens with one zero-tool think
 # step on the REAL user message (no synthetic anchor round), `agent/
 # turn-stopping` steers exactly once, and the turn continues with the
 # promoted RESIDENT catalog — shells + str_replace_editor + the discovery
@@ -80,9 +79,9 @@
 # from prior context (a resumed session, a steering continuation, a follow-up
 # where the model goes straight to tools): the first tool call of a turn is
 # denied with an anchor directive while the turn's streamed reasoning sits
-# below `minChars` (the A5 intervention shape — the only measured condition
-# that lengthens the chain while tools keep working). Retries carry the
-# forced deliberation in-history. `minChars: 0` disables the row.
+# below `minChars` (a push-back while tools stay live — the intervention
+# shape that both lengthens the chain and keeps tools working). Retries carry
+# the forced deliberation in-history. `minChars: 0` disables the row.
 - id: deliberation-gate
   name: ./deliberation-gate.mjs
   config:
@@ -200,7 +199,7 @@
 # `skill-filesystem` contributes local-root discovery for agents on this
 # preset. The full skill CATALOG injection (`dsh-tool-skill`, the ~9KB
 # `<available_skills>` reminder) is REMOVED (local addition): it perturbs the
-# trajectory (issue #6). Instead `skill-search` exposes two small on-demand
+# trajectory (— see the sibling repository). Instead `skill-search` exposes two small on-demand
 # tools — skill_search (list matching summaries) and skill_load (inject one
 # skill's full instructions) — the tool-search pattern.
 - id: skill-filesystem

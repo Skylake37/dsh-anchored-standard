@@ -4,10 +4,10 @@
  * full Standard toolset stays registered and executes FOR REAL behind a
  * bash gateway.
  *
- * This is the engine behind `eternal-minimal` (user idea 2: make the model
- * believe it never left the two-tool Minimal condition). Community consensus
- * holds that V4 Pro's strongest thinking happens on the Minimal two-tool
- * condition and degrades as the visible catalog grows, so this preset NEVER
+ * This is the engine behind `eternal-minimal`: make the model believe it
+ * never left the two-tool Minimal condition. V4 Pro's strongest thinking is
+ * observed on the Minimal two-tool condition and degrades as the visible
+ * catalog grows, so this preset NEVER
  * grows it: no promotion, no discovery tools, no catalog dump — every
  * request of every turn carries the same two tool definitions the official
  * `minimal` preset carries.

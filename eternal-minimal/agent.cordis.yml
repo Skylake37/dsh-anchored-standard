@@ -28,7 +28,7 @@
 # transform of the assemble/pre-step waterfalls, so the Minimal-pair strip
 # always gets the final say.
 #
-# Community consensus: V4 Pro thinks hardest on the two-tool Minimal
+# V4 Pro thinks hardest on the two-tool Minimal
 # condition and degrades as the visible catalog grows — so this preset never
 # grows it. No anchor round, no promotion, no discovery tools: EVERY request
 # carries the same `bash` + `str_replace_editor` definitions the official

@@ -2,9 +2,8 @@
  * cot-drip — deliberation maintenance for the EXECUTE phase.
  *
  * The anchor modes (and the think/execute split) open each turn with deep
- * reasoning, but community measurements show deliberation decays across a
- * long tool loop: once the model is mid-execution, later steps collapse
- * back to thin "Let me…" actions. This plugin drips ONE short user-role
+ * reasoning, but deliberation decays across a long tool loop: once the model
+ * is mid-execution, later steps collapse back to thin "Let me…" actions. This plugin drips ONE short user-role
  * reminder into the conversation after every Nth tool result — never
  * blocking, never erroring, never touching the tool catalog:
  *

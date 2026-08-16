@@ -1,8 +1,8 @@
-# The `a4-think-standard` experimental preset: every user turn opens with
-# ONE think step on the measured A4 condition — tool definitions PRESENT in
-# the request, `tool_choice: "none"` on the wire via a sibling provider
-# route — then a steering notice opens the execute phase on the official
-# provider with the resident catalog.
+# The `wire-think-standard` experimental preset: every user turn opens with
+# ONE think step that keeps the tool catalog visible while the wire forbids
+# invocation — tool definitions PRESENT in the request, `tool_choice: "none"`
+# on the wire via a sibling provider route — then a steering notice opens the
+# execute phase on the official provider with the resident catalog.
 #
 # This file is an AGENT-PLANE composition. The roster mounts it ONCE under a
 # standing scope; every session naming it joins by scope parentage, so the
@@ -25,7 +25,7 @@
 
 # The sibling think route (local addition): a zero-dependency DeepSeek
 # chat-completions adapter registered under its OWN provider id
-# (`deepseek-a4-think`) that puts `tool_choice: "none"` on the wire — the one
+# (`deepseek-wire-think`) that puts `tool_choice: "none"` on the wire — the one
 # condition the official adapter cannot express (GenerateOptions has no
 # tool_choice vocabulary). Connection facts resolve row config >
 # `llm-deepseek` settings section > env (DEEPSEEK_BASE_URL / DEEPSEEK_API_KEY).
@@ -35,21 +35,21 @@
 # the route exists before the engine's first probe. Set `logprobs: true` for
 # the opt-in logprobs research hook (mean token logprob per think request,
 # logged by the adapter).
-- id: a4-adapter
-  name: ./a4-adapter.mjs
+- id: toolchoice-adapter
+  name: ./toolchoice-adapter.mjs
 
-# The A4 phase engine (local addition): step 0 of every user turn keeps the
+# The wire think phase engine (local addition): step 0 of every user turn keeps the
 # natural tool catalog and `agent/request` swaps ONLY the provider to the
 # sibling route above (the frozen loop-built request is untouched — only the
 # route differs); `agent/turn-stopping` steers exactly once (resume-safe from
 # durable steering/message events); step 1+ restores the official provider
 # and sees the promoted RESIDENT catalog (shells + str_replace_editor + the
 # discovery tools + dev_tool_search-unlocked names). If the sibling route is
-# absent, think steps degrade to the zero-tool A1 condition. `mode:
+# absent, think steps degrade to the zero-tool condition. `mode:
 # first-turn` limits the swap (and its prefix-cache cost) to the session's
 # first user turn. Subagents default to always-execute.
-- id: a4-think
-  name: ./a4-think.mjs
+- id: wire-think
+  name: ./wire-think.mjs
   config:
     mode: every-turn
 
@@ -163,7 +163,7 @@
 # `skill-filesystem` contributes local-root discovery for agents on this
 # preset. The full skill CATALOG injection (`dsh-tool-skill`, the ~9KB
 # `<available_skills>` reminder) is REMOVED (local addition): it perturbs the
-# trajectory (issue #6). Instead `skill-search` exposes two small on-demand
+# trajectory (— see the sibling repository). Instead `skill-search` exposes two small on-demand
 # tools — skill_search (list matching summaries) and skill_load (inject one
 # skill's full instructions) — the tool-search pattern.
 - id: skill-filesystem

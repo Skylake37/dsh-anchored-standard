@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, inject, name, parseSseStream, serializeA4Request } from '../shared/a4-adapter.mjs'
+import { apply, inject, name, parseSseStream, serializeThinkRequest } from '../shared/toolchoice-adapter.mjs'
 
 function registerAdapterCtx(config, registerError = undefined) {
   const registered = []
@@ -44,7 +44,7 @@ function sseStream(chunks) {
 }
 
 const OPTIONS = () => ({
-  provider: 'deepseek-a4-think',
+  provider: 'deepseek-wire-think',
   model: 'deepseek-v4-pro',
   reasoningEffort: 'max',
   system: 'You are a helpful software engineer assistant.',
@@ -56,14 +56,14 @@ const OPTIONS = () => ({
 const REAL_ENV_KEY = process.env.DEEPSEEK_API_KEY
 
 test('exports a diagnostic plugin name and the llm inject', () => {
-  assert.equal(name, 'a4-adapter')
+  assert.equal(name, 'toolchoice-adapter')
   assert.deepEqual(inject, ['llm'])
 })
 
 test('registers a duck-typed adapter under its own provider id', () => {
-  const { registration } = registerAdapterCtx({ provider: 'my-a4' })
-  assert.deepEqual(registration.providers, ['my-a4'])
-  assert.equal(registration.adapter.providerInfo('my-a4').id, 'my-a4')
+  const { registration } = registerAdapterCtx({ provider: 'my-think-route' })
+  assert.deepEqual(registration.providers, ['my-think-route'])
+  assert.equal(registration.adapter.providerInfo('my-think-route').id, 'my-think-route')
   assert.equal(typeof registration.adapter.stream, 'function')
 })
 
@@ -75,20 +75,20 @@ test('a duplicate registration is caught and warned, never thrown', () => {
 })
 
 test('the wire request carries tool_choice none exactly when tools are present', () => {
-  const withTools = serializeA4Request(OPTIONS(), {})
+  const withTools = serializeThinkRequest(OPTIONS(), {})
   assert.equal(withTools.tool_choice, 'none')
   assert.ok(Array.isArray(withTools.tools))
   assert.equal(withTools.tools[0].function.name, 'bash')
 
-  const withoutTools = serializeA4Request({ ...OPTIONS(), tools: [] }, {})
+  const withoutTools = serializeThinkRequest({ ...OPTIONS(), tools: [] }, {})
   assert.equal(withoutTools.tool_choice, undefined)
   assert.equal(withoutTools.tools, undefined)
 
-  assert.equal(serializeA4Request(OPTIONS(), { toolChoice: 'auto' }).tool_choice, 'auto')
+  assert.equal(serializeThinkRequest(OPTIONS(), { toolChoice: 'auto' }).tool_choice, 'auto')
 })
 
 test('thinking and sampling map like the official wire format', () => {
-  const body = serializeA4Request(OPTIONS(), {})
+  const body = serializeThinkRequest(OPTIONS(), {})
   assert.deepEqual(body.thinking, { type: 'enabled' })
   assert.equal(body.reasoning_effort, 'max')
   assert.equal(body.stream, true)
@@ -96,17 +96,17 @@ test('thinking and sampling map like the official wire format', () => {
   assert.equal(body.model, 'deepseek-v4-pro')
   assert.equal(body.messages[0].role, 'system')
 
-  const off = serializeA4Request({ ...OPTIONS(), reasoningEffort: 'off' }, {})
+  const off = serializeThinkRequest({ ...OPTIONS(), reasoningEffort: 'off' }, {})
   assert.deepEqual(off.thinking, { type: 'disabled' })
   assert.equal(off.reasoning_effort, undefined)
 
-  const title = serializeA4Request({ ...OPTIONS(), purpose: 'session-title' }, {})
+  const title = serializeThinkRequest({ ...OPTIONS(), purpose: 'session-title' }, {})
   assert.deepEqual(title.thinking, { type: 'disabled' })
 })
 
 test('history serialization follows the official nuances', () => {
   const messages = [
-    { id: 'a1', role: 'assistant', content: [
+    { id: 'm1', role: 'assistant', content: [
       { type: 'reasoning', text: 'think' },
       { type: 'text', text: 'plan' },
       { type: 'tool-call', id: 'call1', name: 'bash', arguments: '{"command":"ls"}' },
@@ -114,9 +114,9 @@ test('history serialization follows the official nuances', () => {
     { id: 'u2', role: 'user', content: [
       { type: 'tool-result', toolCallId: 'call1', content: [] },
     ], source: { kind: 'user' } },
-    { id: 'a2', role: 'assistant', content: [{ type: 'text', text: '' }], source: { kind: 'user' } },
+    { id: 'm2', role: 'assistant', content: [{ type: 'text', text: '' }], source: { kind: 'user' } },
   ]
-  const body = serializeA4Request({ ...OPTIONS(), messages }, {})
+  const body = serializeThinkRequest({ ...OPTIONS(), messages }, {})
   const [assistant, tool, bare] = body.messages.slice(1)
   assert.equal(assistant.role, 'assistant')
   assert.equal(assistant.content, 'plan')
@@ -130,8 +130,8 @@ test('history serialization follows the official nuances', () => {
 })
 
 test('logprobs lands on the wire only when opted in', () => {
-  assert.equal(serializeA4Request(OPTIONS(), {}).logprobs, undefined)
-  const withLogprobs = serializeA4Request(OPTIONS(), { logprobs: true })
+  assert.equal(serializeThinkRequest(OPTIONS(), {}).logprobs, undefined)
+  const withLogprobs = serializeThinkRequest(OPTIONS(), { logprobs: true })
   assert.equal(withLogprobs.logprobs, true)
   assert.equal(withLogprobs.top_logprobs, 1)
 })
@@ -238,7 +238,7 @@ test('HTTP failures map to coded errors', async () => {
 test('a missing API key fails with MISSING_CREDENTIAL before any fetch', async () => {
   const savedKey = process.env.DEEPSEEK_API_KEY
   delete process.env.DEEPSEEK_API_KEY
-  const { registration } = registerAdapterCtx({ baseURL: 'https://example.test', apiKeyEnv: 'A4_TEST_KEY' })
+  const { registration } = registerAdapterCtx({ baseURL: 'https://example.test', apiKeyEnv: 'TOOLCHOICE_TEST_KEY' })
   try {
     await assert.rejects(
       () => registration.adapter.stream(OPTIONS()).next(),

@@ -10,7 +10,7 @@ DeepSeek Harness is distributed under the MIT License:
 
 The full MIT permission notice is included in this repository's LICENSE file.
 
-shared/a4-adapter.mjs additionally adapts a minimal, protocol-faithful subset
+shared/toolchoice-adapter.mjs additionally adapts a minimal, protocol-faithful subset
 of the DeepSeek Harness llm-deepseek adapter pipeline (request serialization,
 SSE parsing, and chunk translation) from the same repository and commit; the
 same MIT attribution above covers it.

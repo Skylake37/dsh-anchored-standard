@@ -21,7 +21,7 @@ Welcome to submit feedback on the plugin in the form of Issues or PRs. For ideas
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 tools | one fixed anchor turn | the anchor reply (`assistant/message`) | +1 model call |
 | Whoami Standard | `whoami-standard/` | 0 tools | one "你是谁" self-introduction turn | the self-introduction reply (`assistant/message`) | +1 model call |
 | Eternal Minimal | `eternal-minimal/` | 2 tools, forever | the visible catalog never grows; heavier tools run via the `dshx` bash gateway | none (no phases) | none |
-| A4 Think-Execute Standard | `a4-think-standard/` | tools present, `tool_choice: none` on the wire | sibling provider route per think step | per-turn: the steer itself | +1 model call/turn, prefix-cache churn |
+| Wire Think-Execute Standard | `wire-think-standard/` | tools present, `tool_choice: none` on the wire | sibling provider route per think step | per-turn: the steer itself | +1 model call/turn, prefix-cache churn |
 | Combo Anchored | `combo-anchored/` | 0 tools, on every user turn | think/execute split + depth gate + deliberation drip as three independent rows | per-mechanism | +1 model call/turn |
 
 Every mode directory is self-contained and installs alone under whatever id
@@ -195,18 +195,18 @@ whether subagents also take the anchor turn.
 | `text` | built-in beat | The reminder text (one "We …" sentence restating the remaining goal). |
 | `includeSubagents` | `false` | Whether subagent calls are dripped too. |
 
-`a4-adapter` (in `a4-think-standard/`; the row must stay the first LOCAL row):
+`toolchoice-adapter` (in `wire-think-standard/`; the row must stay the first LOCAL row):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `provider` | `deepseek-a4-think` | The sibling route id the adapter owns; registering an id twice throws DUPLICATE_ADAPTER (caught, degraded). |
+| `provider` | `deepseek-wire-think` | The sibling route id the adapter owns; registering an id twice throws DUPLICATE_ADAPTER (caught, degraded). |
 | `toolChoice` | `none` | The wire `tool_choice` sent whenever tool definitions are present. |
 | `baseURL` / `apiKeyEnv` | settings/env | Row config first, then the `llm-deepseek` settings section, then `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`. |
 | `logprobs` | `false` | Opt-in research hook: request token logprobs and log a per-request mean summary (no StreamChunk surface exists). |
 
-`a4-think` (in `a4-think-standard/`): same `mode` / `suppressedContextSources` /
+`wire-think` (in `wire-think-standard/`): same `mode` / `suppressedContextSources` /
 `includeSubagents` / `steerText` semantics as `think-phase`, plus
-`provider` (must match the `a4-adapter` row's id) and `defaultProvider`
+`provider` (must match the `toolchoice-adapter` row's id) and `defaultProvider`
 (the route execute steps restore onto, default `deepseek-official`).
 
 `instruction-hint` (all modes): `promoteOn` matching the mode's promotion
@@ -221,7 +221,7 @@ preset/                  Anchored Standard — the base mode
 zero-anchored-standard/  variant: fixed zero-tool anchor turn
 whoami-standard/         variant: "你是谁" anchor turn, subagents inherit
 eternal-minimal/         variant: Minimal pair forever + dshx bash gateway
-a4-think-standard/       variant: wire-level A4 condition (tools + tool_choice=none)
+wire-think-standard/       variant: wire-level condition (tools + tool_choice=none)
 combo-anchored/          combination package: think split + gate + drip rows
 shared/                  single source of truth for plugins used by 2+ modes
 scripts/sync-modes.mjs   materializes shared/ plugins into every mode dir
@@ -513,14 +513,13 @@ Restart DeepSeek Harness, create a blank session, select **Eternal Minimal
 and `dshx …` lines run the heavier Standard tools for real.
 
 ## Deliberation Gate (experimental)
-## A4 Think-Execute Standard (experimental)
+## Wire Think-Execute Standard (experimental)
 ## Combo Anchored (experimental) — the combination package
 
 The everything-is-a-plugin showcase: THREE orthogonal anchoring mechanisms
 composed as independent rows, each with its own knobs, each removable or
 retunable by editing one line of `agent.cordis.yml`. They attack the
-measured pre-tool deliberation collapse (A3: ~164 chars on a callable
-catalog) at different moments of a turn:
+pre-tool deliberation collapse at different moments of a turn:
 
 | Row | Mechanism | Owns |
 |---|---|---|
@@ -533,28 +532,15 @@ the paths that skip it (steering continuations, resumed sessions,
 straight-to-tools follow-ups), and the drip sustains deliberation across
 long tool loops. Defaults are deliberately gentle (`minChars: 400`,
 `every: 4`, one beat per turn); tune per workload. Swapping the
-`think-phase` row for `a4-think` + `a4-adapter` upgrades the opening to the
-wire-level A4 condition (see above) at the cost of the sibling route and
-its prefix-cache churn.
+`think-phase` row for `wire-think` + `toolchoice-adapter` upgrades the
+opening to the wire-level condition (see above) at the cost of the sibling
+route and its prefix-cache churn.
 
 Explored and rejected for this package: pure Code Mode presentation
-(`presentAs('code')` collapses the catalog into one `run_code` tool) — the
-repo's own Project2 evaluation scored PTC 92 vs Minimal's 99/96, so the
-single-tool surface measurably underperforms the pair; and text-only fake
-tools / ghost tool-call history — community cells A6 (~180) and A7 (~292)
-showed SHORTER chains or a broken first-word signature.
-
-Install as a separate preset id:
-
-```sh
-dsh_home="${DSH_HOME:-$HOME/.dsh}"
-mkdir -p "$dsh_home/.agent-presets"
-test ! -e "$dsh_home/.agent-presets/combo-anchored"
-cp -R combo-anchored "$dsh_home/.agent-presets/combo-anchored"
-```
-
-Restart DeepSeek Harness, create a blank session, select **Combo Anchored
-(experimental)**, then work as usual.
+(`presentAs('code')` collapses the catalog into one `run_code` tool) — a
+single-tool surface measurably underperforms the two-tool condition in the
+sibling project's evaluations; and text-only fake tools or ghost tool-call
+histories — both proved unreliable anchors in practice.
 
 ## Official ecosystem guidance
 

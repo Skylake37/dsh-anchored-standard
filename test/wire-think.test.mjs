@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, name, STEER_TEXT } from '../shared/a4-think.mjs'
+import { apply, name, STEER_TEXT } from '../shared/wire-think.mjs'
 
-const THINK_PROVIDER = 'deepseek-a4-think'
+const THINK_PROVIDER = 'deepseek-wire-think'
 
 function register(config, options = {}) {
   const listeners = {}
@@ -65,7 +65,7 @@ const FULL_CATALOG = () => [
 ]
 
 test('exports a diagnostic plugin name', () => {
-  assert.equal(name, 'a4-think')
+  assert.equal(name, 'wire-think')
 })
 
 test('with the route registered: think keeps the natural catalog and swaps the provider', async () => {
@@ -73,7 +73,7 @@ test('with the route registered: think keeps the natural catalog and swaps the p
   const agent = makeAgent()
   await prestep(listeners['agent/pre-step'], agent, 1, 0, [userMessage])
 
-  // A4: the assembled request keeps its tools — the wire lever does the rest.
+  // Wire: the assembled request keeps its tools — the wire lever does the rest.
   const assembled = await assemble(listeners['system-prompt/assemble'], agent, FULL_CATALOG())
   assert.deepEqual(assembled.tools.map((tool) => tool.name).sort(), FULL_CATALOG().map((tool) => tool.name).sort())
 
@@ -152,12 +152,12 @@ test('steering happens exactly once per turn with the notice shape', async () =>
   const message = agent.steered[0]
   assert.equal(message.role, 'user')
   assert.equal(message.content[0].text, STEER_TEXT)
-  assert.equal(message.source.plugin, 'a4-think')
+  assert.equal(message.source.plugin, 'wire-think')
 })
 
-test('a durable a4-think steering event prevents a post-restart double steer', async () => {
+test('a durable wire-think steering event prevents a post-restart double steer', async () => {
   const events = [
-    { type: 'steering/message', seq: 2, data: { turn: 1, content: [], source: { kind: 'plugin', plugin: 'a4-think' } } },
+    { type: 'steering/message', seq: 2, data: { turn: 1, content: [], source: { kind: 'plugin', plugin: 'wire-think' } } },
   ]
   const { listeners } = register({}, { providers: [THINK_PROVIDER] })
   const agent = makeAgent('restart', events)

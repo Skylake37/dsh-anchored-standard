@@ -1,18 +1,19 @@
 /**
- * A4 think-execute phase engine — every user turn opens with ONE think step
- * on the measured A4 condition (tool definitions PRESENT, `tool_choice:
- * "none"` on the wire), then a steering notice opens the execute phase on
- * the official provider with the resident catalog.
+ * Wire think-execute phase engine — every user turn opens with ONE think step
+ * with tool definitions PRESENT in the request but invocation forbidden on
+ * the wire (`tool_choice: "none"`), then a steering notice opens the execute
+ * phase on the official provider with the resident catalog.
  *
- * Community cell A4 (tools + none) measured the LONGEST pre-action
- * deliberation of any reachable condition (~2005 CoT chars, "We" 3/3) —
- * above the zero-tool A1 (~1501). `tool_choice` is outside the harness
- * GenerateOptions vocabulary, so reaching A4 takes the sanctioned wire seam:
+ * Keeping the definitions visible while the wire forbids invocation lets the
+ * model plan against everything it will actually be allowed to use, and
+ * leaves tools one parameter away from working again. `tool_choice` is
+ * outside the harness GenerateOptions vocabulary, so reaching this condition
+ * takes the sanctioned wire seam:
  *
  *  1. THINK (step 0): the assembled request keeps its natural tool catalog
  *     (no stripping!), and an `agent/request` listener swaps ONLY the
- *     provider route to the sibling adapter (a4-adapter.mjs, default
- *     `deepseek-a4-think`) — which puts `tool_choice: "none"` on the wire.
+ *     provider route to the sibling adapter (toolchoice-adapter.mjs, default
+ *     `deepseek-wire-think`) — which puts `tool_choice: "none"` on the wire.
  *     The frozen loop-built request is untouched (the log-reconstructability
  *     invariant holds); only the route differs. Auto-injected context is
  *     still stripped during think steps (lever 3).
@@ -26,7 +27,7 @@
  *
  * Degradation ladder (never bricks a session):
  *  - sibling adapter not registered (row missing / DUPLICATE_ADAPTER on a
- *    second preset mount) → think steps fall back to the zero-tool A1
+ *    second preset mount) → think steps fall back to the zero-tool
  *    condition, exactly like think-phase.mjs;
  *  - a filter failure → full catalog with a one-time warning;
  *  - a steer failure → the think reply stands as the turn's answer.
@@ -43,7 +44,7 @@
  */
 
 /** Cordis plugin name used by loader diagnostics. */
-export const name = 'a4-think'
+export const name = 'wire-think'
 
 /**
  * Deliberately NO inject list: services are touched at event time only
@@ -86,12 +87,12 @@ function sourceList(value, field, fallback) {
   return new Set(value)
 }
 
-/** Register the per-session A4 think/execute phase controller. */
+/** Register the per-session wire think/execute phase controller. */
 export function apply(ctx, config) {
   const mode = parseMode(config?.mode)
   const thinkProvider = typeof config?.provider === 'string' && config.provider.length > 0
     ? config.provider
-    : 'deepseek-a4-think'
+    : 'deepseek-wire-think'
   const defaultProvider = typeof config?.defaultProvider === 'string' && config.defaultProvider.length > 0
     ? config.defaultProvider
     : DEFAULT_OFFICIAL_PROVIDER
@@ -199,7 +200,7 @@ export function apply(ctx, config) {
     }
   }, { prepend: true })
 
-  // The A4 lever: swap ONLY the provider route on think steps, and restore
+  // The wire lever: swap ONLY the provider route on think steps, and restore
   // the original route on every other step (the folded header seeds the next
   // step's config from the last request, which was the think route).
   ctx.on('agent/request', async (payload, next) => {
@@ -235,7 +236,7 @@ export function apply(ctx, config) {
     try {
       const entry = context.agent === undefined ? undefined : state.get(context.agent.session?.id)
       if (entry?.phase === 'think' && !thinkRouteAvailable()) {
-        // Degraded think: the zero-tool A1 condition (no wire lever).
+        // Degraded think: the zero-tool condition (no wire lever).
         return { ...assembled, tools: [] }
       }
       if (entry?.phase !== 'think') {
@@ -251,7 +252,7 @@ export function apply(ctx, config) {
         }
       }
       // THINK with the wire lever: keep the natural catalog untouched — the
-      // sibling adapter forces `tool_choice: "none"` on the wire (A4).
+      // sibling adapter forces `tool_choice: "none"` on the wire.
       return assembled
     } catch (error) {
       warnOnce(`${name}: phase filter failed, exposing the full catalog: ${String((error && error.message) || error)}`)

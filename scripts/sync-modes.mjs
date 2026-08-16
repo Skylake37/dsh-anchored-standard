@@ -32,7 +32,7 @@ const MODES = [
   { dir: 'zero-anchored-standard', own: [] },
   { dir: 'whoami-standard', own: [] },
   { dir: 'eternal-minimal', own: ['eternal-minimal.mjs'] },
-  { dir: 'a4-think-standard', own: [] },
+  { dir: 'wire-think-standard', own: [] },
   { dir: 'combo-anchored', own: [] },
 ]
 

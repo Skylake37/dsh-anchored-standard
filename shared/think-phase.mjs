@@ -3,22 +3,21 @@
  * zero-tool THINK step, then continues with the promoted resident catalog
  * for execution.
  *
- * This is the engine behind `think-execute-standard` (user idea 1: separate
- * thinking from execution). Community measurements of V4 Pro's trajectory
- * conditions show the deepest "We …" reasoning chains happen when the request
- * carries NO tool definitions (cell A1: ~1501 CoT chars, "We" 3/3), while a
- * callable catalog collapses deliberation before the first tool call (cell
- * A3: ~164 chars). The longest raw condition (A4, tools + tool_choice=none,
- * ~2005 chars) is NOT reachable through the official deepseek adapter — it
- * does not map `tool_choice` at all (MVP cut) — so the zero-tool A1 condition
- * is the strongest think-phase anchor a plugin can produce.
+ * This is the engine behind the think/execute split: separate thinking from
+ * execution. On DeepSeek V4 Pro the deepest "We …" reasoning chains happen
+ * when the request carries NO tool definitions, while a callable catalog
+ * collapses deliberation before the first tool call — so the think step
+ * strips the whole catalog. (A tools-visible-but-locked variant needs
+ * wire-level `tool_choice`, which the official deepseek adapter does not
+ * map at all (MVP cut); the sibling repository's `wire-think-standard`
+ * covers that variant.)
  *
  * Mechanism, per user turn:
  *
  *  1. THINK (step 0): `system-prompt/assemble` strips the catalog to ZERO
  *     tools and `agent/pre-step` strips auto-injected context (same
  *     suppressed-source discipline as the anchored presets), so the first
- *     request of the turn reproduces the A1 condition on the REAL user
+ *     request of the turn reproduces the zero-tool condition on the REAL user
  *     message — no synthetic anchor round, no deferred input. The model
  *     writes its full "We …" plan as an ordinary assistant reply.
  *  2. STEER: a text-only reply would close the turn, so `agent/turn-stopping`
@@ -194,7 +193,7 @@ export function apply(ctx, config) {
     try {
       const entry = context.agent === undefined ? undefined : state.get(context.agent.session?.id)
       if (entry?.phase === 'think') {
-        // THINK: the A1 zero-tool condition on the real user message.
+        // THINK: the zero-tool condition on the real user message.
         return { ...assembled, tools: [] }
       }
       // EXECUTE (and unknown sessions — compaction service calls, cold

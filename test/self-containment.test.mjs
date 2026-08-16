@@ -13,7 +13,7 @@ const MODE_DIRS = [
   'zero-anchored-standard',
   'whoami-standard',
   'eternal-minimal',
-  'a4-think-standard',
+  'wire-think-standard',
   'combo-anchored',
 ]
 

@@ -1,19 +1,18 @@
 /**
- * A4 think adapter — a sibling DeepSeek route that puts `tool_choice: "none"`
+ * Think-route adapter — a sibling DeepSeek route that puts `tool_choice: "none"`
  * on the wire, the ONE condition the official adapter cannot express
  * (GenerateOptions has no tool_choice vocabulary; `dsh-llm-deepseek` documents
  * the mapping as an MVP cut).
  *
- * Community measurements put the A4 condition (tools defined + tool_choice
- * none) at the LONGEST pre-action deliberation of any reachable cell
- * (~2005 CoT chars, "We" 3/3) — above even the zero-tool A1 (~1501). This
- * adapter exists to reach it from a preset-local plugin:
+ * Keeping the tool definitions in the prompt while the wire forbids
+ * invocation preserves the model's full planning context during deliberation
+ * — a think condition worth reaching from a preset-local plugin:
  *
- *  - It registers under its OWN provider id (default `deepseek-a4-think`);
+ *  - It registers under its OWN provider id (default `deepseek-wire-think`);
  *    re-registering `deepseek-official` would throw DUPLICATE_ADAPTER, and
  *    the official DeepSeekAdapter cannot be wrapped (its wire body is built
  *    inside a private generator with no seam).
- *  - `agent/request` (see a4-think.mjs) routes THINK steps here and routes
+ *  - `agent/request` (see wire-think.mjs) routes THINK steps here and routes
  *    every other step back to the official provider, so tool-bearing steps
  *    keep the battle-tested official transport. This adapter only ever needs
  *    to be wire-correct for THINK requests, but it implements the full
@@ -34,8 +33,7 @@
  *    thrown adapter error into a terminal error finish);
  *  - `logprobs` (opt-in research hook): the DeepSeek wire has no harness
  *    StreamChunk surface for logprob data, so the adapter can only request
- *    it and LOG a per-request summary — the runtime approximation of the
- *    "logprobs/向量层逆向" idea, offline-analysis ready.
+ *    it and LOG a per-request summary — an offline trajectory-analysis feed.
  *
  * Registering the same provider id twice (two presets both mounting this row)
  * throws DUPLICATE_ADAPTER at mount; the plugin catches that, warns once,
@@ -43,13 +41,13 @@
  */
 
 /** Cordis plugin name used by loader diagnostics. */
-export const name = 'a4-adapter'
+export const name = 'toolchoice-adapter'
 
 /** The llm registry must exist before this plugin can register a route. */
 export const inject = ['llm']
 
 /** Default provider route id this adapter owns. */
-export const DEFAULT_PROVIDER = 'deepseek-a4-think'
+export const DEFAULT_PROVIDER = 'deepseek-wire-think'
 
 /** Default DeepSeek endpoint (same fallback chain as the official row). */
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
@@ -105,7 +103,7 @@ async function resolveApiKey(ctx, apiKeyEnv) {
   }
   const envValue = process.env[apiKeyEnv]
   if (envValue !== undefined && envValue.length > 0) return envValue
-  const error = new Error(`A4 think adapter: no API key resolved for ${apiKeyEnv}`)
+  const error = new Error(`Think-route adapter: no API key resolved for ${apiKeyEnv}`)
   error.code = 'MISSING_CREDENTIAL'
   throw error
 }
@@ -151,7 +149,7 @@ function serializeMessages(messages) {
   const wire = []
   for (const message of Array.isArray(messages) ? messages : []) {
     if (hasImage(message.content)) {
-      const error = new Error('A4 think adapter: image content is not supported on this wire route')
+      const error = new Error('Think-route adapter: image content is not supported on this wire route')
       error.code = 'UNSUPPORTED_CONTENT'
       throw error
     }
@@ -191,10 +189,10 @@ function resolveThinking(options) {
 }
 
 /**
- * Build the wire request. The A4 addition over the official serializer:
+ * Build the wire request. The think-route addition over the official serializer:
  * `tool_choice` when tool definitions are present (default 'none').
  */
-export function serializeA4Request(options, config) {
+export function serializeThinkRequest(options, config) {
   const messages = []
   if (typeof options.system === 'string' && options.system.length > 0) {
     messages.push({ role: 'system', content: options.system })
@@ -272,7 +270,7 @@ export async function* parseSseStream(body) {
       // Reader already released — nothing to do.
     }
   }
-  const error = new Error('A4 think adapter: SSE stream ended without [DONE]')
+  const error = new Error('Think-route adapter: SSE stream ended without [DONE]')
   error.code = 'STREAM_CLOSED'
   throw error
 }
@@ -350,7 +348,7 @@ export async function* translateChunks(payloads, onLogprobs) {
     try {
       chunk = JSON.parse(payload)
     } catch {
-      const error = new Error(`A4 think adapter: malformed SSE payload: ${payload.slice(0, 120)}`)
+      const error = new Error(`Think-route adapter: malformed SSE payload: ${payload.slice(0, 120)}`)
       error.code = 'MALFORMED_RESPONSE'
       throw error
     }
@@ -412,7 +410,7 @@ export async function* translateChunks(payloads, onLogprobs) {
     if (chunk.usage !== undefined && chunk.usage !== null) pendingUsage = mapUsage(chunk.usage)
   }
 
-  const error = new Error('A4 think adapter: payload stream ended without [DONE]')
+  const error = new Error('Think-route adapter: payload stream ended without [DONE]')
   error.code = 'STREAM_CLOSED'
   throw error
 }
@@ -435,7 +433,7 @@ export function apply(ctx, config) {
 
   const adapter = {
     providerInfo(id) {
-      return { id, name: 'DeepSeek (community A4 think route)' }
+      return { id, name: 'DeepSeek (community think route)' }
     },
     providerRetryPolicy() {
       return undefined
@@ -469,12 +467,12 @@ export function apply(ctx, config) {
     async * stream(options) {
       const connection = resolveConnection(ctx, config)
       const apiKey = await resolveApiKey(ctx, connection.apiKeyEnv)
-      const body = serializeA4Request(options, { toolChoice: config?.toolChoice, logprobs })
+      const body = serializeThinkRequest(options, { toolChoice: config?.toolChoice, logprobs })
       const headers = {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json',
         accept: 'text/event-stream',
-        'user-agent': 'deepseek-harness-community-a4-adapter/0.1.0 (dsh-plugin)',
+        'user-agent': 'deepseek-harness-community-think-route-adapter/0.1.0 (dsh-plugin)',
         ...(options.sessionId !== undefined ? { 'x-deepseek-harness-session-id': String(options.sessionId) } : {}),
         ...(options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {}),
       }
@@ -489,14 +487,14 @@ export function apply(ctx, config) {
         })
       } catch (error) {
         if (options.signal?.aborted) throw error
-        const wrapped = new Error(`A4 think adapter: request to ${connection.baseURL} failed`)
+        const wrapped = new Error(`Think-route adapter: request to ${connection.baseURL} failed`)
         wrapped.code = 'TRANSPORT'
         wrapped.cause = error
         throw wrapped
       }
 
       if (!response.ok) {
-        let message = `A4 think adapter: HTTP ${response.status}`
+        let message = `Think-route adapter: HTTP ${response.status}`
         try {
           const parsed = await response.json()
           if (parsed?.error?.message) message = parsed.error.message
@@ -516,7 +514,7 @@ export function apply(ctx, config) {
         throw wrapped
       }
       if (response.body === null || response.body === undefined) {
-        const wrapped = new Error('A4 think adapter: no response body')
+        const wrapped = new Error('Think-route adapter: no response body')
         wrapped.code = 'EMPTY_RESPONSE'
         throw wrapped
       }
@@ -524,7 +522,7 @@ export function apply(ctx, config) {
       const onLogprobs = logprobs
         ? (mean, count) => {
           try {
-            ctx.logger.info(`a4-adapter: logprobs summary — mean=${mean.toFixed(4)} tokens=${count}`)
+            ctx.logger.info(`toolchoice-adapter: logprobs summary — mean=${mean.toFixed(4)} tokens=${count}`)
           } catch {
             // Logging is best-effort telemetry only.
           }
@@ -537,6 +535,6 @@ export function apply(ctx, config) {
   try {
     ctx.llm.registerAdapter([provider], adapter)
   } catch (error) {
-    warnOnce(`${name}: registering provider "${provider}" failed (${String((error && error.message) || error)}); the a4-think engine will degrade to the zero-tool think condition`)
+    warnOnce(`${name}: registering provider "${provider}" failed (${String((error && error.message) || error)}); the wire-think engine will degrade to the zero-tool think condition`)
   }
 }

@@ -4,18 +4,16 @@
  * of a turn is denied with an anchor directive when the turn has not yet
  * shown enough reasoning.
  *
- * This is the engine behind `deliberation-gate` — the runtime approximation
- * of user idea 3 (logprobs / embedding-layer reverse engineering). The
- * harness adapters do not expose logprobs, so the signal is reversed from
- * the OBSERVABLE layer instead: durable `assistant/chunk` events carry every
- * reasoning/text delta of the live trajectory, and their accumulated length
- * per turn is a cheap, robust depth proxy for the measured collapse
- * (community cell A3: a callable catalog throttles deliberation to ~164
- * chars before the first bash call, vs ~1501 on the zero-tool condition).
- * When the proxy says "shallow", the gate denies once with a planning
- * directive — the same intervention shape as cell A5 ("ignore" + auto,
- * ~1985 chars while bash calls kept working), the only measured condition
- * that BOTH lengthens the chain and keeps tools live.
+ * This is the engine behind `deliberation-gate` — a trajectory-depth gate
+ * built on the observable layer (the harness adapters expose no logprobs):
+ * durable `assistant/chunk` events carry every reasoning/text delta of the
+ * live trajectory, and their accumulated length per turn is a cheap, robust
+ * deliberation-depth proxy for the collapse a callable catalog causes —
+ * pre-action reasoning shrinks to a fraction of its no-tools depth. When
+ * the proxy says "shallow", the gate denies once with a planning directive
+ * (a push-back while tools stay live — the intervention shape that both
+ * prompts deeper reasoning and keeps tool calls working); the retry then
+ * carries the forced deliberation in-history.
  *
  * Behavior:
  *  - `session/event` accumulates `text-delta`/`reasoning-delta` lengths per
@@ -26,8 +24,8 @@
  *  - A resumed session (no in-process chunk state) is cold-scanned from its
  *    durable log on first dispatch, so restarts keep the same depth.
  *  - `tools/pre-execute` checks the CURRENT turn's accumulated depth before
- *    dispatch: at or above `minChars` (default 400 — above A3's ~164, below
- *    A1's ~1501) the call proceeds untouched; below it, the call is denied
+ *    dispatch: at or above `minChars` (default 400, tunable) the call
+ *    proceeds untouched; below it, the call is denied
  *    with `gateText` (a planning prompt, phrased so it never reads as a tool
  *    failure) at most `maxGatesPerTurn` times (default 1) — the retry then
  *    carries the forced deliberation in-history.
