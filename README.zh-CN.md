@@ -17,6 +17,9 @@ Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文�
 | Anchored Standard | `preset/` | 2 个工具（Minimal 对） | Minimal 工具 schema | 首次持久 `tool/call` **或** `assistant/message`（`promoteOn: either`） | 无 |
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 个工具 | 一轮固定锚定消息 | 锚定回复（`assistant/message`） | 多一次模型调用 |
 | Whoami Standard | `whoami-standard/` | 0 个工具 | 一轮"你是谁"自我介绍 | 自我介绍回复（`assistant/message`） | 多一次模型调用 |
+| Eternal Minimal | `eternal-minimal/` | 永远只有 2 个工具 | 可见目录永不增长；重型工具经 `dshx` bash 网关真实执行 | 无（无阶段概念） | 无 |
+| Wire Think-Execute Standard | `wire-think-standard/` | 工具在场 + wire 层 `tool_choice: none` | 思考步路由到兄弟 provider | 按轮：steer 本身 | 每轮 +1 调用、前缀缓存抖动 |
+| Combo Anchored | `combo-anchored/` | 每轮用户消息先 0 工具深思 | 思考/执行分离 + 深度闸门 + 深思滴灌三行独立拼装 | 按机制各自生效 | 每轮 +1 调用 |
 
 每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。
 
@@ -143,6 +146,41 @@ maxTokens 下，Minimal 工具 schema 5/5 锚定（首行 `We need modify…`，
 "This round is a test. Tools are not open yet; all tools will open next round."，
 whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定轮。
 
+
+`eternal-minimal`（位于 `eternal-minimal/`；该行必须保持 FIRST）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `guide` | `true` | 在系统提示追加简短 `dshx` 能力指南；`false` 保持 persona 字节纯净。 |
+| `gateway` | `true` | 拦截 `dshx` shell 命令并真实执行对应工具；`false` 只留裸 Minimal 对。 |
+| `gatewayCommand` | `dshx` | 拦截命令词。 |
+| `maxGatewayChars` | `12000` | 单次网关结果负载上限。 |
+| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | 每个请求都剥离（没有晋升边界）。 |
+
+
+`cot-drip`（位于 `combo-anchored/`）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `every` | `4` | 每第 N 个工具结果附带一次深思节拍；`0` 关闭滴灌。 |
+| `maxPerTurn` | `1` | 每轮节拍上限。 |
+| `text` | 内置节拍 | 提醒文本（一句 "We …" 重述剩余目标）。 |
+| `includeSubagents` | `false` | 子 agent 的调用是否也滴灌。 |
+
+`toolchoice-adapter`（位于 `wire-think-standard/`；该行必须保持首个本地行）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `provider` | `deepseek-wire-think` | 兄弟路由 id；重复注册触发 DUPLICATE_ADAPTER（被捕获并降级）。 |
+| `toolChoice` | `none` | 工具定义在场时发送的 wire `tool_choice`。 |
+| `baseURL` / `apiKeyEnv` | settings/env | 行配置优先，其次 `llm-deepseek` settings 段，最后 `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`。 |
+| `logprobs` | `false` | opt-in 研究钩子：请求 token logprobs 并记录每请求均值摘要。 |
+
+`wire-think`（位于 `wire-think-standard/`）：`mode` / `suppressedContextSources` /
+`includeSubagents` / `steerText` 语义同 `think-phase`，另有 `provider`（须与
+`toolchoice-adapter` 行一致）和 `defaultProvider`（执行步还原的路由，默认
+`deepseek-official`）。
+
 `instruction-hint`（所有模式）：`promoteOn` 与各模式晋升语义对齐（基础模式
 `either`，变体 `assistant-message`）——那条一次性的"存在指令文件，先读再动手"
 提示等晋升后才注入。
@@ -153,6 +191,9 @@ whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定�
 preset/                  Anchored Standard——基础模式
 zero-anchored-standard/  变体：固定零工具锚定轮
 whoami-standard/         变体："你是谁"锚定轮，子 agent 继承
+eternal-minimal/         变体：Minimal 对永恒 + dshx bash 网关
+wire-think-standard/       变体：wire 层条件（工具定义在场 + 调用禁止）
+combo-anchored/          组合包：思考分离 + 闸门 + 滴灌三行拼装
 shared/                  多模式共用插件的唯一源
 scripts/sync-modes.mjs   把 shared/ 插件物化到每个模式目录
 test/                    零依赖测试套件（npm test）
@@ -348,6 +389,72 @@ cp -R whoami-standard "$dsh_home/.agent-presets/whoami-standard"
 
 重启 DeepSeek Harness，新建空白会话，选择 **Whoami Standard (experimental)**，
 然后发送第一条消息——自我介绍轮先跑，你的消息在下一轮带着完整工具被回答。
+
+## Think-Execute Standard（实验）
+## Eternal Minimal（实验）
+
+"让模型以为从未离开极简模式"：模型可见目录整个会话恒等于 Minimal 对
+（`bash` + `str_replace_editor`）——没有锚定轮、没有晋升、没有发现工具、
+目录永不增长——同时完整 Standard 工具集保持注册，并通过 `dshx` bash 网关
+**真实执行**：
+
+```
+dshx list                           # 列出所有网关工具
+dshx web_search '{"query": "..."}'  # 真实执行 web_search
+dshx read_image '{"path": "..."}'   # 真实执行 read_image
+```
+
+1. **永恒对**：`system-prompt/assemble` 在每个请求上只保留 shell +
+   `str_replace_editor`（思考步、compaction 后、子 agent——一切请求），
+   自动注入上下文全程剥离（没有按晋升边界抑制的概念）。
+2. **网关**：`tools/pre-execute` 监听器拦截以 `dshx` 开头的 bash 命令，经
+   `ctx.tools.execute()`（完整注册表管线——策略、guard、执行、渲染）分发，
+   并把渲染输出作为命令结果返回。deny 通道是派发前替换结果的唯一受支持
+   手段，因此网关负载带错误标记——每条负载都明确说明工具已执行、输出在后，
+   模型将其读作输出。真实工具确实跑了：用户看到真实效果（文件、搜索、
+   子 agent），与按名调用无异。
+3. **指南**：系统提示追加简短 `dshx` 能力指南（`guide: false` 可得字节纯净
+   的 Minimal persona），让模型在不增加第三个可见工具的前提下知道网关存在。
+
+网关拒绝分发 shell/`str_replace_editor` 本身（"请直接调用"），这也使递归不可能
+发生。未知工具、JSON 格式错误、工具失败都以可读负载返回。`gateway: false`
+可得到无拦截的纯双工具会话。
+
+以独立 preset id 安装：
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/eternal-minimal"
+cp -R eternal-minimal "$dsh_home/.agent-presets/eternal-minimal"
+```
+
+重启 DeepSeek Harness，新建空白会话，选择 **Eternal Minimal (experimental)**，
+照常工作——模型编写 shell 命令，`dshx …` 行真实运行重型 Standard 工具。
+
+## Deliberation Gate（实验）
+## Wire Think-Execute Standard（实验）
+## Combo Anchored（实验）——插件组合包
+
+"一切皆插件"的展示位：**三个正交锚定机制**以独立行拼装，各自带开关，
+改 `agent.cordis.yml` 里的一行即可删除或重调。它们在轮次的不同时刻攻击
+工具前的深思塌缩：
+
+| 行 | 机制 | 负责的时刻 |
+|---|---|---|
+| `think-phase` | 零工具思考步 + steering 通知 | 轮次开场 |
+| `deliberation-gate` | 深度闸门拦截浅轮次的首工具调用 | 首个动作 |
+| `cot-drip` | 每第 N 个工具结果后一条 "We …" 节拍（`tools/post-execute` additionalContexts——不拦截、不报错） | 漫长的中段 |
+
+`mode: every-turn` 下思考步每轮开场，闸门兜住绕过它的路径（steering
+续步、恢复的会话、直奔工具的跟进），滴灌在长工具回路中维持深思。默认值
+刻意温和（`minChars: 400`、`every: 4`、每轮一拍），按负载调整。把
+`think-phase` 行换成 `wire-think` + `toolchoice-adapter` 可把开场升级为
+wire 层条件（见上），代价是兄弟路由及其前缀缓存代价。
+
+探索过并否决的方向：纯 Code Mode 呈现（`presentAs('code')` 把目录折叠为
+单个 `run_code` 工具）——单工具表面在兄弟项目的评测中明显劣于双工具
+条件；文本诡称有工具与幽灵 tool_call 历史——实践中都不是可靠锚。
 
 ## 官方生态要求
 

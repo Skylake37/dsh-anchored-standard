@@ -20,6 +20,9 @@ Welcome to submit feedback on the plugin in the form of Issues or PRs. For ideas
 | Anchored Standard | `preset/` | 2 tools (the Minimal pair) | Minimal tool schema | first durable `tool/call` **or** `assistant/message` (`promoteOn: either`) | none |
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 tools | one fixed anchor turn | the anchor reply (`assistant/message`) | +1 model call |
 | Whoami Standard | `whoami-standard/` | 0 tools | one "你是谁" self-introduction turn | the self-introduction reply (`assistant/message`) | +1 model call |
+| Eternal Minimal | `eternal-minimal/` | 2 tools, forever | the visible catalog never grows; heavier tools run via the `dshx` bash gateway | none (no phases) | none |
+| Wire Think-Execute Standard | `wire-think-standard/` | tools present, `tool_choice: none` on the wire | sibling provider route per think step | per-turn: the steer itself | +1 model call/turn, prefix-cache churn |
+| Combo Anchored | `combo-anchored/` | 0 tools, on every user turn | think/execute split + depth gate + deliberation drip as three independent rows | per-mechanism | +1 model call/turn |
 
 Every mode directory is self-contained and installs alone under whatever id
 you copy it to (see [Install](#install)).
@@ -171,6 +174,41 @@ in `whoami-standard`, `false` in `zero-anchored-standard`).
 next round." in zero-anchored, "你是谁" in whoami); `includeSubagents` —
 whether subagents also take the anchor turn.
 
+
+`eternal-minimal` (in `eternal-minimal/`; the row must stay FIRST):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `guide` | `true` | Append the short `dshx` capability guide to the system prompt; `false` keeps the persona byte-pure. |
+| `gateway` | `true` | Intercept `dshx` shell commands and execute the real tools; `false` leaves the bare Minimal pair. |
+| `gatewayCommand` | `dshx` | The interception word. |
+| `maxGatewayChars` | `12000` | Cap on one gateway result payload. |
+| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | Stripped on every request (there is no promotion boundary). |
+
+
+`cot-drip` (in `combo-anchored/`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `every` | `4` | Attach one deliberation beat after every Nth tool result; `0` disables the drip. |
+| `maxPerTurn` | `1` | Beats per turn. |
+| `text` | built-in beat | The reminder text (one "We …" sentence restating the remaining goal). |
+| `includeSubagents` | `false` | Whether subagent calls are dripped too. |
+
+`toolchoice-adapter` (in `wire-think-standard/`; the row must stay the first LOCAL row):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `provider` | `deepseek-wire-think` | The sibling route id the adapter owns; registering an id twice throws DUPLICATE_ADAPTER (caught, degraded). |
+| `toolChoice` | `none` | The wire `tool_choice` sent whenever tool definitions are present. |
+| `baseURL` / `apiKeyEnv` | settings/env | Row config first, then the `llm-deepseek` settings section, then `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`. |
+| `logprobs` | `false` | Opt-in research hook: request token logprobs and log a per-request mean summary (no StreamChunk surface exists). |
+
+`wire-think` (in `wire-think-standard/`): same `mode` / `suppressedContextSources` /
+`includeSubagents` / `steerText` semantics as `think-phase`, plus
+`provider` (must match the `toolchoice-adapter` row's id) and `defaultProvider`
+(the route execute steps restore onto, default `deepseek-official`).
+
 `instruction-hint` (all modes): `promoteOn` matching the mode's promotion
 semantics (`either` in the base mode, `assistant-message` in the variants) —
 the one-shot "instruction files exist, read them before acting" hint waits
@@ -182,6 +220,9 @@ for promotion.
 preset/                  Anchored Standard — the base mode
 zero-anchored-standard/  variant: fixed zero-tool anchor turn
 whoami-standard/         variant: "你是谁" anchor turn, subagents inherit
+eternal-minimal/         variant: Minimal pair forever + dshx bash gateway
+wire-think-standard/       variant: wire-level condition (tools + tool_choice=none)
+combo-anchored/          combination package: think split + gate + drip rows
 shared/                  single source of truth for plugins used by 2+ modes
 scripts/sync-modes.mjs   materializes shared/ plugins into every mode dir
 test/                    zero-dependency test suite (npm test)
@@ -420,6 +461,86 @@ Restart DeepSeek Harness, create a blank session, select **Whoami Standard
 (experimental)**, then send your first message — the self-introduction round
 runs first, and your message is answered with the full tooling on the next
 turn.
+
+## Think-Execute Standard (experimental)
+## Eternal Minimal (experimental)
+
+The "make the model believe it never left Minimal" mode: the model-visible
+catalog stays EXACTLY the Minimal pair (`bash` + `str_replace_editor`) for
+the WHOLE session — no anchor round, no promotion, no discovery tools, no
+catalog growth — while the full Standard toolset stays registered and
+executes FOR REAL behind the `dshx` bash gateway:
+
+```
+dshx list                           # list every gateway tool
+dshx web_search '{"query": "..."}'  # execute the real web_search
+dshx read_image '{"path": "..."}'   # execute the real read_image
+```
+
+1. **Eternal pair**: `system-prompt/assemble` keeps only the shells +
+   `str_replace_editor` on every request (think steps, post-compaction,
+   subagents — everything), and auto-injected context is stripped everywhere
+   (there is no promotion boundary to key suppression on).
+2. **Gateway**: a `tools/pre-execute` listener intercepts bash commands
+   starting with `dshx`, dispatches them through `ctx.tools.execute()` (the
+   full registry pipeline — policy, guards, execution, rendering), and
+   returns the rendered output as the command result. The deny channel is the
+   only sanctioned pre-dispatch way to substitute a result, so gateway
+   payloads arrive flagged as errors — every payload states plainly that the
+   tool executed and its output follows, so the model reads it as output.
+   The real tool really ran: the user sees genuine effects (files, searches,
+   subagents) exactly as if it had been called by name.
+3. **Guide**: a short `dshx` capability guide is appended to the system
+   prompt (`guide: false` for a byte-pure Minimal persona) so the model knows
+   the gateway exists without a third visible tool.
+
+The gateway refuses to dispatch the shells/`str_replace_editor` themselves
+("invoke them directly"), which also makes recursion impossible. Unknown
+tools, malformed JSON, and tool failures all come back as readable payloads.
+Set `gateway: false` for a bare two-tool session with no interception.
+
+Install as a separate preset id:
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/eternal-minimal"
+cp -R eternal-minimal "$dsh_home/.agent-presets/eternal-minimal"
+```
+
+Restart DeepSeek Harness, create a blank session, select **Eternal Minimal
+(experimental)**, then work as usual — the model composes shell commands,
+and `dshx …` lines run the heavier Standard tools for real.
+
+## Deliberation Gate (experimental)
+## Wire Think-Execute Standard (experimental)
+## Combo Anchored (experimental) — the combination package
+
+The everything-is-a-plugin showcase: THREE orthogonal anchoring mechanisms
+composed as independent rows, each with its own knobs, each removable or
+retunable by editing one line of `agent.cordis.yml`. They attack the
+pre-tool deliberation collapse at different moments of a turn:
+
+| Row | Mechanism | Owns |
+|---|---|---|
+| `think-phase` | zero-tool think step + steering notice | the turn OPENING |
+| `deliberation-gate` | depth gate denies the first tool call of a shallow turn | the FIRST ACTION |
+| `cot-drip` | one "We …" beat after every Nth tool result (`tools/post-execute` additionalContexts — never blocking, never erroring) | the LONG MIDDLE |
+
+With `mode: every-turn` the think step opens every turn, the gate catches
+the paths that skip it (steering continuations, resumed sessions,
+straight-to-tools follow-ups), and the drip sustains deliberation across
+long tool loops. Defaults are deliberately gentle (`minChars: 400`,
+`every: 4`, one beat per turn); tune per workload. Swapping the
+`think-phase` row for `wire-think` + `toolchoice-adapter` upgrades the
+opening to the wire-level condition (see above) at the cost of the sibling
+route and its prefix-cache churn.
+
+Explored and rejected for this package: pure Code Mode presentation
+(`presentAs('code')` collapses the catalog into one `run_code` tool) — a
+single-tool surface measurably underperforms the two-tool condition in the
+sibling project's evaluations; and text-only fake tools or ghost tool-call
+histories — both proved unreliable anchors in practice.
 
 ## Official ecosystem guidance
 
