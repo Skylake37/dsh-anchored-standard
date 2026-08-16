@@ -4,7 +4,7 @@
   "subagents": "resident",
   "suppressedContextSources": ["agent-instructions", "skill-catalog"],
   "suppressedContextPlugins": ["@deepseek-ai/dsh-system-prompt"],
-  "controlledPersonaText": "You are a helpful software engineer assistant.",
-  "personaText": "You are a helpful software engineer assistant.",
+  "controlledPersonaText": "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.",
+  "personaText": "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.",
   "compactionTools": ["read", "write", "edit", "glob", "grep", "todo_write", "ask_user_question"]
 }

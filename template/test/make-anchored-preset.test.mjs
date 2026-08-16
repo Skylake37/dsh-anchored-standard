@@ -97,7 +97,7 @@ description: 功能完整。
 order: 1
 `
 
-const CONTROLLED_PERSONA = 'You are a helpful software engineer assistant.'
+const CONTROLLED_PERSONA = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.'
 const FULL_PERSONA = CONTROLLED_PERSONA
 
 const TEMPLATE_DEFAULTS = {
@@ -174,8 +174,8 @@ test('buildAnchorBootstrapRow renders the anchored profile row', () => {
   assert.match(row, /subagents: resident/)
   assert.match(row, /bootstrapTools: \["bash", "str_replace_editor"\]/)
   assert.match(row, /promoteOn: either/)
-  assert.match(row, /controlledPersonaText: "You are a helpful software engineer assistant\."/)
-  assert.match(row, /personaText: "You are a helpful software engineer assistant\."/)
+  assert.match(row, /controlledPersonaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\."/)
+  assert.match(row, /personaText: "You are a helpful software engineer assistant\. When working on a task, always open your reasoning with We need\."/)
   assert.match(row, /compactionTools:/)
   assert.doesNotMatch(row, /bootstrapMaxTokens/)
 })
