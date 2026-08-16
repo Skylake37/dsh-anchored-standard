@@ -9,8 +9,19 @@ custom-bash + instruction-hint/skill-search/dev-tool-search + compaction
 epoch）：请求 #1 只有 Minimal 工具对；晋升后**在正确时刻**开放 resident 目录
 （bootstrap 工具对 + 三个发现工具），源 preset 的其余工具通过
 `dev_tool_search` 按需解锁——既不是全程只有两个工具，也不是晋升时一次性
-倾倒完整目录（那会拉回 standard 轨迹）。另有 `--whoami` 可选流：whoami
-零工具预热回合 + 子代理继承同一锚定流程。
+倾倒完整目录（那会拉回 standard 轨迹）。
+
+## 支持哪些模式
+
+hook 套件目前组合出三种模式，生成器 CLI 暴露前两种；第三种与上游
+`zero-anchored-standard` 同构，hook 已支持，只是还没做独立开关。每个 hook
+具体干什么、适用哪种模式见 [`hook/README.md`](./hook/README.md)。
+
+| 模式 | 生成器入口 | 首模型请求 | 锚定插件 | 晋升信号 | 子代理 |
+|---|---|---|---|---|---|
+| anchored（默认） | 默认 | `bash + str_replace_editor` | `tool-bootstrap` | 首个持久 `tool/call` 或 `assistant/message`（`promoteOn` 可配） | 默认跳过 bootstrap（`--bootstrap-subagents` 反转） |
+| whoami | `--whoami` | 0 工具 + `anchor-turn(text: 你是谁)` | `anchor-turn` + `zero-tool-bootstrap` | anchor 回复（`assistant/message`） | 继承 anchor（`includeSubagents: true`） |
+| zero-anchor | 尚未暴露 CLI（同一组 hook 可用 `buildAnchorRows` 组合） | 0 工具 + `anchor-turn` 默认测试句 | `anchor-turn` + `zero-tool-bootstrap` | anchor 回复（`assistant/message`） | 默认跳过（`includeSubagents: false`） |
 
 ## 文件布局
 
@@ -22,8 +33,9 @@ template/
   hook/dev-tool-search.mjs  # 按需工具发现/解锁
   hook/skill-search.mjs     # skill_search / skill_load（替代完整技能目录注入）
   hook/custom-bash.mjs      # Windows Git Bash 工具（普通子进程 seam，无 PTY）
-  hook/whoami-turn.mjs      # --whoami 模式：首回合 whoami 预热
-  hook/zero-tool-bootstrap.mjs # --whoami 模式：零工具首请求 + resident 目录
+  hook/anchor-turn.mjs      # 零工具 anchor-turn（whoami/zero 共用，text 决定口味）
+  hook/zero-tool-bootstrap.mjs # anchor-turn 模式：零工具首请求 + resident 目录
+  hook/README.md            # 每个 hook 的职责、配置键、适用模式
   defaults.json             # 下游自有参数，合并上游后在这里同步参数
   README.md                 # 本说明
 tools/
@@ -109,7 +121,7 @@ node tools/make-anchored-preset.mjs \
   --to creative-anchored \
   --guard-cordis-tools /path/to/dsh/apps/cli/node_modules/@deepseek-ai/dsh-tool-cordis/lib/index.js
 
-# whoami-standard 流（零工具预热回合，子代理也继承该锚定）：
+# whoami-standard 流（anchor-turn 文本=你是谁；零工具预热回合，子代理也继承该锚定）：
 node tools/make-anchored-preset.mjs --from standard --to standard-whoami --whoami
 
 # 干跑，只打印计划：
@@ -171,7 +183,7 @@ PR #14 的 Minimal 工具对、PR #27 的 resident/compaction 流），**不要�
 | `preset/agent.cordis.yml` 的 `suppressedContextSources` | `template/defaults.json` → `suppressedContextSources` |
 | `preset/tool-bootstrap.mjs` 的 resident 集合 / 解锁 / epoch 语义 | `template/hook/tool-bootstrap.mjs` + `template/hook/compaction-epoch.mjs`（手动对照同步） |
 | `preset/{instruction-hint,dev-tool-search,skill-search,custom-bash}.mjs` | `template/hook/` 同名文件（手动对照同步） |
-| `whoami-standard/{zero-tool-bootstrap,whoami-turn}.mjs` | `template/hook/` 同名文件（注意 import 改为 `./compaction-epoch.mjs`） |
+| `shared/{zero-tool-bootstrap,anchor-turn}.mjs`（whoami/zero 两模式共用） | `template/hook/` 同名文件（`zero-tool-bootstrap` 的 import 改为 `./compaction-epoch.mjs`） |
 | 插件对 `agent/pre-step` / `agent/request` 的 `prepend` 与降级语义 | `template/hook/tool-bootstrap.mjs`（手动对照同步） |
 
 改完后重跑测试并重新生成 preset：

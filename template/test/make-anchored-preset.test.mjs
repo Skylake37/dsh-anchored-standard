@@ -7,7 +7,7 @@ import test from 'node:test'
 import {
   buildBootstrapRow,
   buildCompanionRows,
-  buildWhoamiRows,
+  buildAnchorRows,
   DEFAULTS_SOURCE,
   detectBootstrapTools,
   generateAnchoredPreset,
@@ -317,17 +317,29 @@ test('generateAnchoredPreset fails loud for unknown families and refuses double 
   )
 })
 
-test('buildWhoamiRows renders the zero-tool anchor with subagent inheritance', () => {
-  const rows = buildWhoamiRows(TEMPLATE_DEFAULTS)
+test('buildAnchorRows renders the whoami flavor of the anchor-turn flow', () => {
+  const rows = buildAnchorRows(TEMPLATE_DEFAULTS)
   assert.match(rows, /- id: zero-tool-bootstrap/)
   assert.match(rows, /name: \.\/zero-tool-bootstrap\.mjs/)
   assert.match(rows, /includeSubagents: true/)
-  assert.match(rows, /- id: whoami-turn/)
-  assert.match(rows, /name: \.\/whoami-turn\.mjs/)
+  assert.match(rows, /- id: anchor-turn/)
+  assert.match(rows, /name: \.\/anchor-turn\.mjs/)
   assert.match(rows, /text: "你是谁"/)
   assert.match(rows, /suppressedContextPlugins: \["@deepseek-ai\/dsh-system-prompt"\]/)
   assert.match(rows, /bootstrapPersonaText: "You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need. If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names."/)
   assert.match(rows, /compactionTools:/)
+})
+
+test('buildAnchorRows can render the zero-anchored flavor (default text, plain subagents)', () => {
+  const rows = buildAnchorRows({
+    text: 'This round is a test. Tools are not open yet; all tools will open next round.',
+    includeSubagents: false,
+    suppressedContextSources: ['agent-instructions', 'skill-catalog'],
+  })
+  assert.match(rows, /- id: anchor-turn/)
+  assert.match(rows, /name: \.\/anchor-turn\.mjs/)
+  assert.match(rows, /text: "This round is a test\. Tools are not open yet; all tools will open next round\."/)
+  assert.match(rows, /includeSubagents: false/)
 })
 
 test('generateAnchoredPreset supports the whoami-standard flow', async (t) => {
@@ -346,9 +358,9 @@ test('generateAnchoredPreset supports the whoami-standard flow', async (t) => {
   const composition = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
   assert.doesNotMatch(composition, /- id: tool-bootstrap/)
   assert.match(composition, /- id: zero-tool-bootstrap/)
-  assert.match(composition, /- id: whoami-turn/)
+  assert.match(composition, /- id: anchor-turn/)
   assert.match(composition, /promoteOn: assistant-message/)
-  for (const file of ['zero-tool-bootstrap.mjs', 'whoami-turn.mjs', 'compaction-epoch.mjs', 'custom-bash.mjs']) {
+  for (const file of ['zero-tool-bootstrap.mjs', 'anchor-turn.mjs', 'compaction-epoch.mjs', 'custom-bash.mjs']) {
     assert.ok(await readFile(join(target, file), 'utf8'), file)
   }
 })
