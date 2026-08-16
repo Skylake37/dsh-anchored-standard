@@ -11,6 +11,8 @@ on demand.
 This is a community project. It is not an official DeepSeek preset and is not
 affiliated with or endorsed by DeepSeek.
 
+Welcome to submit feedback on the plugin in the form of Issues or PRs. For ideas for new plugins or useful findings, please submit them under the [repository](https://github.com/0liveiraaa/DeepseekCotexplorations).
+
 ## Modes at a glance
 
 | Mode | Directory | First model request | Anchor mechanism | Promotion signal | Cost |

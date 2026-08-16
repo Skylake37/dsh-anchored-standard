@@ -8,6 +8,8 @@ Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文�
 
 这是社区项目，并非 DeepSeek 官方 preset，也不代表 DeepSeek 的认可或背书。
 
+欢迎您将插件的使用反馈以Issue或PR的形式进行提交,对于新插件的思路或有用的发现请在[仓库](https://github.com/0liveiraaa/DeepseekCotexplorations)下提交。
+
 ## 模式总览
 
 | 模式 | 目录 | 首次模型请求 | 锚定机制 | 晋升信号 | 代价 |
