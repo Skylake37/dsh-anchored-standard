@@ -9,6 +9,18 @@
 `anchor-bootstrap.mjs`。上游自有副本（`shared/`、三个上游 mode 目录）仍按
 上游同步管理，不在这里维护。
 
+## 安装方式
+
+```pwsh
+# 新 id：从源 preset 复制并套壳
+node tools/make-anchored-preset.mjs --from <source> --to <new-id> --mode zero
+
+# 原位 patch：保留当前 id，直接改 agent.cordis.yml 并写 HOOK-INSTALL.md
+node tools/patch-preset-in-place.mjs --target <preset-dir> --mode zero --name '<display-name>'
+```
+
+装完后**完全重启 DSH**；standing mount 不会回收旧代际。
+
 ## 模式总览
 
 | mode | `firstTurnTools` | `anchorText` | `subagents` | 首模型请求 | 晋升信号 |
@@ -103,6 +115,17 @@ compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
   `skill-search` 跟随其后；
 - 源 preset 已挂 `anchor-bootstrap` / `tool-bootstrap` /
   `zero-tool-bootstrap` 时 fail loud，拒绝二次套壳。
+
+## 验证要点
+
+- `zero` / `whoami`：首个 `request/header` 工具面为空，消息面只有合成 anchor；
+  anchor 回复后下一个 header 已 promoted，resident 基集 = shells +
+  `str_replace_editor` + 三个发现工具 + 已解锁工具。
+- `anchored`：首个 header 只有 `bootstrapTools`。
+- 看完整链条，不只首条回复：全程应保持 `We need / We have / We …`，不回落
+  `Let me` / `The user asks`。
+- `compaction/end` 后回落到模式基集 + `compactionTools`，直到新晋升信号。
+- Windows 上确认 `bash` 来自 `custom-bash` 且真实可执行。
 
 ## 与上游的同步映射
 

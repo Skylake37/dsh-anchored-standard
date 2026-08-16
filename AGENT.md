@@ -58,6 +58,23 @@ merging upstream, follow the mapping table in `template/README.md` and update
 `template/hook/anchor-bootstrap.mjs`). Then re-run the tests and regenerate any
 installed presets.
 
+## Hook docs
+
+- `template/hook/README.md` — authoritative hook reference: modes, config keys,
+  per-file responsibilities, verification points.
+- `template/research/mode-merge-analysis.md` — atomic mechanism cross-cut and
+  merge design.
+- `tools/make-anchored-preset.mjs` — generate a new preset from a source id/dir.
+- `tools/patch-preset-in-place.mjs` — patch an existing preset dir in place;
+  writes `HOOK-INSTALL.md` beside its `agent.cordis.yml`.
+
+Installed preset records (outside this repo, referenced by path):
+
+- `C:\Users\Skylake37\.dsh\.agent-presets\matlab-agentic-preset\HOOK-INSTALL.md`
+  — in-place MATLAB preset patch record.
+- Zero-mode presets: `standard-zero`, `code-zero`, `minimal-zero`,
+  `cordis-zero` (display names end in `-梁圣版`).
+
 ## Done checks
 
 1. `git log --oneline agent-dev..main` is empty (main fully merged into agent-dev).
