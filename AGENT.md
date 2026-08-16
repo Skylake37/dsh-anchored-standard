@@ -65,4 +65,4 @@ installed presets.
    `.github/workflows/sync-upstream.yml` (main is the pure mirror plus sync infra).
 3. `git log --oneline main..agent-dev` shows only downstream commits
    (`template/`, `tools/`, `AGENT.md`, `CLAUDE.md`).
-4. `npm test` is green.
+4. `npm test` and `npm run check` are green.
