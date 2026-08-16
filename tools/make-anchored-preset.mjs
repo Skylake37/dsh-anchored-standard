@@ -988,7 +988,7 @@ Options:
   --compaction-tools <a,b>  Core work set exposed after compaction/end before
                             re-promotion. Default from template/defaults.json.
   --win-bash-path <path>    Git Bash executable for the Windows custom-bash
-                            row. Default: C:\Program Files\Git\bin\bash.exe.
+                            row. Default: C:\\Program Files\\Git\\bin\\bash.exe.
   --whoami                  Use the upstream whoami-standard anchor flow:
                             first request = fixed self-introduction on an
                             EMPTY tool surface; the reply promotes the session
