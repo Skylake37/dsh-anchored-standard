@@ -71,9 +71,12 @@ installed presets.
 Installed preset records (outside this repo, referenced by path):
 
 - `C:\Users\Skylake37\.dsh\.agent-presets\matlab-agentic-preset\HOOK-INSTALL.md`
-  — in-place MATLAB preset patch record.
-- Zero-mode presets: `standard-zero`, `code-zero`, `minimal-zero`,
-  `cordis-zero` (display names end in `-梁圣版`).
+  — in-place MATLAB preset patch record (mode anchored).
+- Anchored-mode presets: `standard-anchored`（标准模式-梁圣版）、
+  `code-anchored`（PTC模式-梁圣版，bootstrapTools=run_code）、
+  `minimal-anchored`（极简模式）、`cordis-anchored`（创造模式-梁圣版，
+  tool-cordis 守卫；headless 无 cordis-host-runner，需 web profile 验证）。
+- zero/whoami 生成已停用（带工具回合链塌回 standard，实测结论）。
 
 ## Done checks
 

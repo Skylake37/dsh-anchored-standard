@@ -5,23 +5,28 @@ preset 上“套壳”，生成新 preset 或原位 patch。所有下游自有�
 `template/` 和 `tools/` 两个目录。
 
 当前只有一个 gate hook：`anchor-bootstrap.mjs`，三种模式 profile：
-`anchored` / `zero` / `whoami`。hook 的完整模式表、配置键、每个文件的职责见
-[`hook/README.md`](./hook/README.md)；原子机理分类与合并设计见
-[`research/mode-merge-analysis.md`](./research/mode-merge-analysis.md)。
+`anchored` / `zero` / `whoami`。**本地生成 preset 只用 `anchored`**；
+zero/whoami profile 保留在 hook 里，但实测带工具回合链会塌回 standard，
+已停用（见 [`research/mode-merge-analysis.md`](./research/mode-merge-analysis.md)）。
+hook 的完整模式表、配置键、每个文件的职责见
+[`hook/README.md`](./hook/README.md)。
 
 ## 快速开始
 
 ```pwsh
 cd D:\Skills\dsh-anchored-standard
 
-# 生成 zero 模式 preset（当前推荐）
-node tools/make-anchored-preset.mjs --from <source-dir-or-id> --to <new-id> --mode zero
+# 生成 anchored 模式 preset（当前唯一交付模式）
+node tools/make-anchored-preset.mjs --from <source-dir-or-id> --to <new-id> --mode anchored
+
+# PTC（code）源：其工具面只有 run_code，锚定在 run_code 上
+node tools/make-anchored-preset.mjs --from <code-preset-dir> --to <new-id> --mode anchored --bootstrap-tools run_code
 
 # 原位 patch 一个已有 preset（例如 matlab-agentic-preset）
-node tools/patch-preset-in-place.mjs --target <preset-dir> --mode zero --name '<display-name>'
+node tools/patch-preset-in-place.mjs --target <preset-dir> --mode anchored --name '<display-name>'
 
 # 干跑，只打印计划
-node tools/make-anchored-preset.mjs --from standard --to standard-zero --mode zero --dry-run
+node tools/make-anchored-preset.mjs --from standard --to standard-anchored --mode anchored --dry-run
 ```
 
 生成后：**完全重启 DeepSeek Harness → 新建空白 session → 选择新 preset**。
