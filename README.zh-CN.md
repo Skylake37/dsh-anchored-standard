@@ -18,6 +18,8 @@ Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文�
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 个工具 | 一轮固定锚定消息 | 锚定回复（`assistant/message`） | 多一次模型调用 |
 | Whoami Standard | `whoami-standard/` | 0 个工具 | 一轮"你是谁"自我介绍 | 自我介绍回复（`assistant/message`） | 多一次模型调用 |
 | Eternal Minimal | `eternal-minimal/` | 永远只有 2 个工具 | 可见目录永不增长；重型工具经 `dshx` bash 网关真实执行 | 无（无阶段概念） | 无 |
+| A4 Think-Execute Standard | `a4-think-standard/` | 工具在场 + wire 层 `tool_choice: none` | 思考步路由到兄弟 provider | 按轮：steer 本身 | 每轮 +1 调用、前缀缓存抖动 |
+| Combo Anchored | `combo-anchored/` | 每轮用户消息先 0 工具深思 | 思考/执行分离 + 深度闸门 + 深思滴灌三行独立拼装 | 按机制各自生效 | 每轮 +1 调用 |
 
 每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。
 
@@ -156,6 +158,29 @@ whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定�
 | `suppressedContextSources` | `[agent-instructions, skill-catalog]` | 每个请求都剥离（没有晋升边界）。 |
 
 
+`cot-drip`（位于 `combo-anchored/`）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `every` | `4` | 每第 N 个工具结果附带一次深思节拍；`0` 关闭滴灌。 |
+| `maxPerTurn` | `1` | 每轮节拍上限。 |
+| `text` | 内置节拍 | 提醒文本（一句 "We …" 重述剩余目标）。 |
+| `includeSubagents` | `false` | 子 agent 的调用是否也滴灌。 |
+
+`a4-adapter`（位于 `a4-think-standard/`；该行必须保持首个本地行）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `provider` | `deepseek-a4-think` | 兄弟路由 id；重复注册触发 DUPLICATE_ADAPTER（被捕获并降级）。 |
+| `toolChoice` | `none` | 工具定义在场时发送的 wire `tool_choice`。 |
+| `baseURL` / `apiKeyEnv` | settings/env | 行配置优先，其次 `llm-deepseek` settings 段，最后 `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`。 |
+| `logprobs` | `false` | opt-in 研究钩子：请求 token logprobs 并记录每请求均值摘要。 |
+
+`a4-think`（位于 `a4-think-standard/`）：`mode` / `suppressedContextSources` /
+`includeSubagents` / `steerText` 语义同 `think-phase`，另有 `provider`（须与
+`a4-adapter` 行一致）和 `defaultProvider`（执行步还原的路由，默认
+`deepseek-official`）。
+
 `instruction-hint`（所有模式）：`promoteOn` 与各模式晋升语义对齐（基础模式
 `either`，变体 `assistant-message`）——那条一次性的"存在指令文件，先读再动手"
 提示等晋升后才注入。
@@ -167,6 +192,8 @@ preset/                  Anchored Standard——基础模式
 zero-anchored-standard/  变体：固定零工具锚定轮
 whoami-standard/         变体："你是谁"锚定轮，子 agent 继承
 eternal-minimal/         变体：Minimal 对永恒 + dshx bash 网关
+a4-think-standard/       变体：wire 层 A4 条件（tools + tool_choice=none）
+combo-anchored/          组合包：思考分离 + 闸门 + 滴灌三行拼装
 shared/                  多模式共用插件的唯一源
 scripts/sync-modes.mjs   把 shared/ 插件物化到每个模式目录
 test/                    零依赖测试套件（npm test）
@@ -406,6 +433,43 @@ cp -R eternal-minimal "$dsh_home/.agent-presets/eternal-minimal"
 照常工作——模型编写 shell 命令，`dshx …` 行真实运行重型 Standard 工具。
 
 ## Deliberation Gate（实验）
+## A4 Think-Execute Standard（实验）
+## Combo Anchored（实验）——插件组合包
+
+"一切皆插件"的展示位：**三个正交锚定机制**以独立行拼装，各自带开关，改
+`agent.cordis.yml` 里的一行即可删除或重调。它们在轮次的不同时刻攻击实测的
+工具前深思塌缩（A3：可调用目录下 ~164 字符）：
+
+| 行 | 机制 | 负责的时刻 |
+|---|---|---|
+| `think-phase` | 零工具思考步 + steering 通知 | 轮次开场 |
+| `deliberation-gate` | 深度闸门拦截浅轮次的首工具调用 | 首个动作 |
+| `cot-drip` | 每第 N 个工具结果后一条 "We …" 节拍（`tools/post-execute` additionalContexts——不拦截、不报错） | 漫长的中段 |
+
+`mode: every-turn` 下思考步每轮开场，闸门兜住绕过它的路径（steering 续步、
+恢复的会话、直奔工具的跟进），滴灌在长工具回路中维持深思。默认值刻意温和
+（`minChars: 400`、`every: 4`、每轮一拍），按负载调整。把 `think-phase` 行
+换成 `a4-think` + `a4-adapter` 可把开场升级为 wire 层 A4 条件（见上），
+代价是兄弟路由及其前缀缓存抖动。
+
+本组合包探索过并否决的方向：纯 Code Mode 呈现（`presentAs('code')` 把目录
+折叠为单个 `run_code` 工具）——仓库自己的 Project2 评测中 PTC 得 92、
+Minimal 得 99/96，单工具表面实测劣于工具对；以及文本诡称有工具 / ghost
+tool_call 历史——社区单元 A6（~180）与 A7（~292）显示思维链更短或首词
+签名被破坏。
+
+以独立 preset id 安装：
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/combo-anchored"
+cp -R combo-anchored "$dsh_home/.agent-presets/combo-anchored"
+```
+
+重启 DeepSeek Harness，新建空白会话，选择 **Combo Anchored (experimental)**，
+照常工作。
+
 ## 官方生态要求
 
 DeepSeek 当前建议社区作者把插件放在自己的 GitHub 项目中，并为仓库添加

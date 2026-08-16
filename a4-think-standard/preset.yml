@@ -1,0 +1,3 @@
+name: A4 Think-Execute Standard (experimental)
+description: Every user turn opens with one think step on the measured A4 condition (tools present + tool_choice=none via a sibling wire route), then steering opens the resident catalog on the official provider. Needs DEEPSEEK_API_KEY visible like the official route.
+order: 11

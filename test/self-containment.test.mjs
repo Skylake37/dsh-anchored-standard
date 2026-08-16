@@ -13,7 +13,9 @@ const MODE_DIRS = [
   'zero-anchored-standard',
   'whoami-standard',
   'eternal-minimal',
-  ]
+  'a4-think-standard',
+  'combo-anchored',
+]
 
 test('no mode references plugins outside its own directory', () => {
   for (const dir of MODE_DIRS) {

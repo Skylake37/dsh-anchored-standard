@@ -21,6 +21,8 @@ Welcome to submit feedback on the plugin in the form of Issues or PRs. For ideas
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 tools | one fixed anchor turn | the anchor reply (`assistant/message`) | +1 model call |
 | Whoami Standard | `whoami-standard/` | 0 tools | one "你是谁" self-introduction turn | the self-introduction reply (`assistant/message`) | +1 model call |
 | Eternal Minimal | `eternal-minimal/` | 2 tools, forever | the visible catalog never grows; heavier tools run via the `dshx` bash gateway | none (no phases) | none |
+| A4 Think-Execute Standard | `a4-think-standard/` | tools present, `tool_choice: none` on the wire | sibling provider route per think step | per-turn: the steer itself | +1 model call/turn, prefix-cache churn |
+| Combo Anchored | `combo-anchored/` | 0 tools, on every user turn | think/execute split + depth gate + deliberation drip as three independent rows | per-mechanism | +1 model call/turn |
 
 Every mode directory is self-contained and installs alone under whatever id
 you copy it to (see [Install](#install)).
@@ -184,6 +186,29 @@ whether subagents also take the anchor turn.
 | `suppressedContextSources` | `[agent-instructions, skill-catalog]` | Stripped on every request (there is no promotion boundary). |
 
 
+`cot-drip` (in `combo-anchored/`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `every` | `4` | Attach one deliberation beat after every Nth tool result; `0` disables the drip. |
+| `maxPerTurn` | `1` | Beats per turn. |
+| `text` | built-in beat | The reminder text (one "We …" sentence restating the remaining goal). |
+| `includeSubagents` | `false` | Whether subagent calls are dripped too. |
+
+`a4-adapter` (in `a4-think-standard/`; the row must stay the first LOCAL row):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `provider` | `deepseek-a4-think` | The sibling route id the adapter owns; registering an id twice throws DUPLICATE_ADAPTER (caught, degraded). |
+| `toolChoice` | `none` | The wire `tool_choice` sent whenever tool definitions are present. |
+| `baseURL` / `apiKeyEnv` | settings/env | Row config first, then the `llm-deepseek` settings section, then `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`. |
+| `logprobs` | `false` | Opt-in research hook: request token logprobs and log a per-request mean summary (no StreamChunk surface exists). |
+
+`a4-think` (in `a4-think-standard/`): same `mode` / `suppressedContextSources` /
+`includeSubagents` / `steerText` semantics as `think-phase`, plus
+`provider` (must match the `a4-adapter` row's id) and `defaultProvider`
+(the route execute steps restore onto, default `deepseek-official`).
+
 `instruction-hint` (all modes): `promoteOn` matching the mode's promotion
 semantics (`either` in the base mode, `assistant-message` in the variants) —
 the one-shot "instruction files exist, read them before acting" hint waits
@@ -196,6 +221,8 @@ preset/                  Anchored Standard — the base mode
 zero-anchored-standard/  variant: fixed zero-tool anchor turn
 whoami-standard/         variant: "你是谁" anchor turn, subagents inherit
 eternal-minimal/         variant: Minimal pair forever + dshx bash gateway
+a4-think-standard/       variant: wire-level A4 condition (tools + tool_choice=none)
+combo-anchored/          combination package: think split + gate + drip rows
 shared/                  single source of truth for plugins used by 2+ modes
 scripts/sync-modes.mjs   materializes shared/ plugins into every mode dir
 test/                    zero-dependency test suite (npm test)
@@ -486,6 +513,49 @@ Restart DeepSeek Harness, create a blank session, select **Eternal Minimal
 and `dshx …` lines run the heavier Standard tools for real.
 
 ## Deliberation Gate (experimental)
+## A4 Think-Execute Standard (experimental)
+## Combo Anchored (experimental) — the combination package
+
+The everything-is-a-plugin showcase: THREE orthogonal anchoring mechanisms
+composed as independent rows, each with its own knobs, each removable or
+retunable by editing one line of `agent.cordis.yml`. They attack the
+measured pre-tool deliberation collapse (A3: ~164 chars on a callable
+catalog) at different moments of a turn:
+
+| Row | Mechanism | Owns |
+|---|---|---|
+| `think-phase` | zero-tool think step + steering notice | the turn OPENING |
+| `deliberation-gate` | depth gate denies the first tool call of a shallow turn | the FIRST ACTION |
+| `cot-drip` | one "We …" beat after every Nth tool result (`tools/post-execute` additionalContexts — never blocking, never erroring) | the LONG MIDDLE |
+
+With `mode: every-turn` the think step opens every turn, the gate catches
+the paths that skip it (steering continuations, resumed sessions,
+straight-to-tools follow-ups), and the drip sustains deliberation across
+long tool loops. Defaults are deliberately gentle (`minChars: 400`,
+`every: 4`, one beat per turn); tune per workload. Swapping the
+`think-phase` row for `a4-think` + `a4-adapter` upgrades the opening to the
+wire-level A4 condition (see above) at the cost of the sibling route and
+its prefix-cache churn.
+
+Explored and rejected for this package: pure Code Mode presentation
+(`presentAs('code')` collapses the catalog into one `run_code` tool) — the
+repo's own Project2 evaluation scored PTC 92 vs Minimal's 99/96, so the
+single-tool surface measurably underperforms the pair; and text-only fake
+tools / ghost tool-call history — community cells A6 (~180) and A7 (~292)
+showed SHORTER chains or a broken first-word signature.
+
+Install as a separate preset id:
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/combo-anchored"
+cp -R combo-anchored "$dsh_home/.agent-presets/combo-anchored"
+```
+
+Restart DeepSeek Harness, create a blank session, select **Combo Anchored
+(experimental)**, then work as usual.
+
 ## Official ecosystem guidance
 
 DeepSeek currently asks community plugin authors to publish plugins in their own

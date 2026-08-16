@@ -32,6 +32,8 @@ const MODES = [
   { dir: 'zero-anchored-standard', own: [] },
   { dir: 'whoami-standard', own: [] },
   { dir: 'eternal-minimal', own: ['eternal-minimal.mjs'] },
+  { dir: 'a4-think-standard', own: [] },
+  { dir: 'combo-anchored', own: [] },
 ]
 
 /** `name: ./xxx.mjs` rows in an agent.cordis.yml (local plugin references). */
