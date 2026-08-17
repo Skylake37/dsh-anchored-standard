@@ -53,7 +53,7 @@ export function buildLayeredRows(profile, bootstrapTools) {
   const rows = []
   const turnOpening = profile.hooks.turnOpening
   rows.push([
-    '# 鈹€鈹€ context-gate (layered patch; must remain FIRST) 鈹€鈹€',
+    '# ── context-gate (layered patch; must remain FIRST) ──',
     '- id: context-gate',
     '  name: ./context-gate.mjs',
     '  config:',
