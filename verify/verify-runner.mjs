@@ -44,7 +44,7 @@ export const Config = z.object({
   provider: z.string(),
   model: z.string(),
   reasoningEffort: z.string(),
-  stopAfterFirstAssistant: z.boolean().default(false),
+  secondTask: z.string(),
 })
 
 export const internals = {
@@ -117,6 +117,15 @@ async function run(ctx, config, io) {
   await agent.whenIdle()
   firstAssistantWatch?.stop()
   await sessions.flush(agent.session)
+
+  if (config.secondTask !== undefined) {
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: config.secondTask }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    await sessions.flush(agent.session)
+  }
 
   // Report: session identity, every request header, then the first assistant reply.
   const out = []
