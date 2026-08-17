@@ -47,3 +47,32 @@ test('patch-from-spec dry-run compiles a session-phase patch without writing', a
   assert.equal(result.result.written, false)
   assert.equal(result.compiled.mode, 'zero')
 })
+
+test('patch-from-spec dry-run compiles a layered toolExecution patch', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-patch-spec-exec-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const target = join(root, 'preset')
+  await mkdir(target, { recursive: true })
+  await writeFile(join(target, 'agent.cordis.yml'), COMPOSITION)
+  const patch = join(root, 'exec.json')
+  await writeFile(patch, JSON.stringify({
+    apiVersion: 'dsh-anchored/v2',
+    backend: 'layered',
+    from: 'standard',
+    mode: 'anchored',
+    hooks: {
+      toolExecution: {
+        deliberationGate: { enabled: true, minChars: 300 },
+        cotDrip: { enabled: true, every: 3, maxPerTurn: 1 },
+      },
+    },
+  }))
+
+  const result = await applyPatchSpec({ target, patch, dryRun: true })
+  assert.equal(result.result.written, false)
+  assert.equal(result.profile.hooks.toolExecution.deliberationGate.enabled, true)
+  assert.equal(result.profile.hooks.toolExecution.deliberationGate.minChars, 300)
+  assert.equal(result.profile.hooks.toolExecution.cotDrip.enabled, true)
+  assert.equal(result.result.ledger.rows.some((row) => row.id === 'deliberation-gate' && row.category === 'added'), true)
+  assert.equal(result.result.ledger.rows.some((row) => row.id === 'cot-drip' && row.category === 'added'), true)
+})

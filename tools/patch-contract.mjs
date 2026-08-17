@@ -4,8 +4,9 @@
  * This module is deliberately pure: it validates a layer composition and
  * compiles the supported session-phase patch into the legacy anchor-bootstrap
  * options. The layered backend additionally supports the independent
- * think-phase/wire-think turnOpening layer. It does not write preset files and
- * does not silently ignore future layers; unsupported mechanisms fail loudly.
+ * think-phase/wire-think turnOpening layer and the independent
+ * deliberation-gate/cot-drip toolExecution layer. It does not write preset
+ * files and does not silently ignore future layers; unsupported mechanisms fail loudly.
  */
 
 export const PATCH_API_VERSION = 'dsh-anchored/v2'
@@ -29,6 +30,7 @@ export const SUPPORTED_PATCH_LAYERS = Object.freeze([
   'anchor',
   'instructionHint',
   'turnOpening',
+  'toolExecution',
 ])
 
 export const CANONICAL_ROW_ORDER = Object.freeze([
@@ -205,7 +207,7 @@ export function normalizePatchProfile(input) {
   if (!Number.isSafeInteger(deliberationMinChars) || deliberationMinChars < 0) throw new TypeError('deliberationGate.minChars must be a non-negative integer')
   const deliberationMaxGates = positiveInteger(deliberationGate.maxGatesPerTurn ?? 1, 'deliberationGate.maxGatesPerTurn')
   const deliberationSubagents = boolean(deliberationGate.includeSubagents, 'patch.hooks.toolExecution.deliberationGate.includeSubagents', sessionPhase.includeSubagents === true)
-  const deliberationText = deliberationGate.gateText
+  const deliberationText = deliberationGate.gateText === undefined ? undefined : string(deliberationGate.gateText, 'patch.hooks.toolExecution.deliberationGate.gateText')
   const cotDrip = object(toolExecution.cotDrip, 'patch.hooks.toolExecution.cotDrip')
   rejectUnknown(cotDrip, new Set(['enabled', 'every', 'maxPerTurn', 'includeSubagents', 'text']), 'patch.hooks.toolExecution.cotDrip')
   const cotEnabled = boolean(cotDrip.enabled, 'patch.hooks.toolExecution.cotDrip.enabled', false)
@@ -213,7 +215,7 @@ export function normalizePatchProfile(input) {
   if (!Number.isSafeInteger(cotEvery) || cotEvery < 0) throw new TypeError('cotDrip.every must be a non-negative integer')
   const cotMaxPerTurn = positiveInteger(cotDrip.maxPerTurn ?? 1, 'cotDrip.maxPerTurn')
   const cotSubagents = boolean(cotDrip.includeSubagents, 'patch.hooks.toolExecution.cotDrip.includeSubagents', sessionPhase.includeSubagents === true)
-  const cotText = cotDrip.text
+  const cotText = cotDrip.text === undefined ? undefined : string(cotDrip.text, 'patch.hooks.toolExecution.cotDrip.text')
 
   const sessionSeed = object(hooks.sessionSeed, 'patch.hooks.sessionSeed')
   const gateway = object(hooks.gateway, 'patch.hooks.gateway')
@@ -224,8 +226,7 @@ export function normalizePatchProfile(input) {
   if (unsupported.sessionSeed && anchorKind !== 'none') throw new TypeError('sessionSeed cannot combine with a live zero/whoami anchor')
   if (turnEnabled && backend !== 'layered') throw new TypeError('think-phase and wire-think are not part of the legacy patch backend')
   if (turnEnabled && backend === 'layered' && mode !== 'anchored') throw new TypeError('turnOpening requires anchored mode in the layered backend')
-  if (deliberationEnabled) throw new TypeError('deliberation-gate is not part of the layered patch backend')
-  if (cotEnabled) throw new TypeError('cot-drip is not part of the layered patch backend')
+  if ((deliberationEnabled || cotEnabled) && backend !== 'layered') throw new TypeError('deliberation-gate and cot-drip are not part of the legacy patch backend')
   if (unsupported.sessionSeed) throw new TypeError('prefab is not part of the layered patch backend')
   if (unsupported.gateway) throw new TypeError('gateway is not part of the layered patch backend')
 

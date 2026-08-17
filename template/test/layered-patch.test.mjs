@@ -32,6 +32,31 @@ test('buildLayeredRows renders independent context, zero-tool, anchor, and compa
   assert.doesNotMatch(rows, /anchor-bootstrap/)
   assert.ok(rows.indexOf('- id: context-gate') < rows.indexOf('- id: zero-tool-bootstrap'))
 })
+test('buildLayeredRows renders deliberation-gate and cot-drip independently in canonical order', () => {
+  const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
+  const gateOnly = normalizePatchProfile({ ...base, hooks: { toolExecution: { deliberationGate: { enabled: true } } } })
+  const gateRows = buildLayeredRows(gateOnly, ['bash', 'str_replace_editor'])
+  assert.match(gateRows, /- id: deliberation-gate/)
+  assert.doesNotMatch(gateRows, /- id: cot-drip/)
+
+  const dripOnly = normalizePatchProfile({ ...base, hooks: { toolExecution: { cotDrip: { enabled: true } } } })
+  const dripRows = buildLayeredRows(dripOnly, ['bash', 'str_replace_editor'])
+  assert.doesNotMatch(dripRows, /- id: deliberation-gate/)
+  assert.match(dripRows, /- id: cot-drip/)
+
+  const both = normalizePatchProfile({
+    ...base,
+    hooks: { toolExecution: { deliberationGate: { enabled: true, minChars: 200 }, cotDrip: { enabled: true, every: 2, maxPerTurn: 1 } } },
+  })
+  const bothRows = buildLayeredRows(both, ['bash', 'str_replace_editor'])
+  assert.ok(bothRows.indexOf('- id: deliberation-gate') < bothRows.indexOf('- id: cot-drip'))
+  const gateBlock = bothRows.slice(bothRows.indexOf('- id: deliberation-gate'), bothRows.indexOf('- id: cot-drip'))
+  const dripBlock = bothRows.slice(bothRows.indexOf('- id: cot-drip'))
+  assert.match(gateBlock, /minChars: 200/)
+  assert.match(dripBlock, /every: 2/)
+  assert.match(dripBlock, /maxPerTurn: 1/)
+})
+
 test('buildLayeredRows keeps think and wire-think mutually exclusive with toolchoice-adapter before wire-think', () => {
   const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
   const think = normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'think' } } })
@@ -53,13 +78,17 @@ test('buildLayeredRows keeps think and wire-think mutually exclusive with toolch
   assert.match(wireBlock, /defaultProvider: "deepseek-official"/)
 })
 
-test('layered turnOpening accepts think and wire-think while other future mechanisms are rejected', () => {
+test('layered turnOpening and toolExecution accept their layers while other future mechanisms are rejected', () => {
   const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
   assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
   assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { toolExecution: { deliberationGate: { enabled: true } } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { toolExecution: { cotDrip: { enabled: true } } } }))
   assert.throws(() => normalizePatchProfile({ ...base, mode: 'zero', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 42, defaultProvider: 'deepseek-official' } } }), /provider/)
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { toolExecution: { deliberationGate: { enabled: true, gateText: 42 } } } }), /gateText/)
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { toolExecution: { cotDrip: { enabled: true, text: '' } } } }), /text/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { sessionSeed: { enabled: true } } }), /prefab/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { gateway: { enabled: true } } }), /gateway/)
 })

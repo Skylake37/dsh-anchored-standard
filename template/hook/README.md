@@ -66,9 +66,9 @@ shared hook 文件。`turnOpening` 现在也是 layered 后端支持的一层，
 渲染/复制 `toolchoice-adapter.mjs`（必须排在 `wire-think.mjs` 之前，且该行的
 `provider` 与 `wire-think` 行使用同一个 sibling provider）和 `wire-think.mjs`，
 并要求 `wire-think` 的 `provider` 与 `defaultProvider` 不同；`mode: zero` /
-`whoami` 与 `turnOpening` 组合会 fail-loud。`toolExecution`、`sessionSeed`、
-`gateway`
-仍会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
+`whoami` 与 `turnOpening` 组合会 fail-loud。`toolExecution` 现在也是 layered 后端支持的一层：`deliberationGate` 渲染/复制
+`deliberation-gate.mjs`，`cotDrip` 渲染/复制 `cot-drip.mjs`，两者相互独立，可单独或同时启用，并写入 preservation ledger；`sessionSeed`、
+`gateway` 仍会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
 `patch-preset-in-place.mjs` 默认行为保持不变。
 重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许
 `sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥，
@@ -173,6 +173,22 @@ compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
   走普通子进程 seam 而非 PTY；
 - 配置：`bashPath`（默认 `bash`，生成器写 Git Bash 路径）、`timeoutMs`、
   `maxOutputBytes`。
+
+### `deliberation-gate.mjs`
+
+- 轨迹深度闸门：`tools/pre-execute` 在当前轮已流式推理/文本长度低于 `minChars` 时，
+  拒绝首个工具调用并返回 `gateText` 规划提示（默认每轮最多 `maxGatesPerTurn` 次）；
+- 配置：`minChars`（默认 400）、`maxGatesPerTurn`（默认 1）、`includeSubagents`、
+  `gateText`；
+- 独立于 `cot-drip`，可与 `cot-drip` 同时挂载；`minChars: 0` 可关闭深度下限。
+
+### `cot-drip.mjs`
+
+- 执行期维护：`tools/post-execute` 每 `every` 次工具结果后注入一条短 user-role
+  “We …” 进度提醒，默认每轮最多 `maxPerTurn` 次；
+- 配置：`every`（默认 4，`0` 关闭）、`maxPerTurn`（默认 1）、`includeSubagents`、
+  `text`；
+- 独立于 `deliberation-gate`，可与 `deliberation-gate` 同时挂载。
 
 ## 生成器的组合规则
 

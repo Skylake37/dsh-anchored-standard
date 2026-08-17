@@ -28,16 +28,23 @@ test('layered dry-run and apply share hashes and preserve undeclared rows', asyn
   } finally { await rm(target, { recursive: true, force: true }) }
 })
 
-test('layered turnOpening is accepted while other future mechanisms still fail', () => {
+test('layered turnOpening and toolExecution are accepted while other future mechanisms still fail', () => {
   assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
   assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { deliberationGate: { enabled: true } } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { cotDrip: { enabled: true } } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { deliberationGate: { enabled: true, minChars: 200 }, cotDrip: { enabled: true, every: 2, maxPerTurn: 1 } } } }))
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'legacy', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /think-phase/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'legacy', hooks: { toolExecution: { deliberationGate: { enabled: true } } } }), /legacy patch backend/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'legacy', hooks: { toolExecution: { cotDrip: { enabled: true } } } }), /legacy patch backend/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', mode: 'zero', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', mode: 'whoami', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'through' } } }), /kind is invalid/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 42, defaultProvider: 'deepseek-official' } } }), /provider/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think', steerText: '' } } }), /steerText/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { deliberationGate: { enabled: true, gateText: '' } } } }), /gateText/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { cotDrip: { enabled: true, text: 42 } } } }), /text/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { sessionSeed: { enabled: true } } }), /prefab/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { gateway: { enabled: true } } }), /gateway/)
 })
@@ -48,6 +55,12 @@ test('think-phase and wire-think are competing turn-opening rows in existing sou
   const wire = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
   assert.deepEqual(duplicatePatchRows(source, think).sort(), ['anchor-turn', 'think-phase', 'wire-think'])
   assert.deepEqual(duplicatePatchRows(source, wire).sort(), ['anchor-turn', 'think-phase', 'toolchoice-adapter', 'wire-think'])
+})
+
+test('deliberation-gate and cot-drip are competing tool-execution rows in existing sources', () => {
+  const source = '- id: deliberation-gate\n  name: ./deliberation-gate.mjs\n- id: cot-drip\n  name: ./cot-drip.mjs\n'
+  const exec = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { toolExecution: { deliberationGate: { enabled: true }, cotDrip: { enabled: true } } } })
+  assert.deepEqual(duplicatePatchRows(source, exec).sort(), ['cot-drip', 'deliberation-gate'])
 })
 
 
@@ -83,6 +96,58 @@ test('layered think and wire patches render/copy independent rows and files', as
     for (const file of ['toolchoice-adapter.mjs', 'wire-think.mjs', 'think-phase.mjs']) {
       assert.equal(await stat(join(target, file)).then(() => true).catch(() => false), file !== 'think-phase.mjs')
     }
+  } finally { await rm(target, { recursive: true, force: true }) }
+})
+
+test('layered deliberation and cot patches render/copy independent rows and ledger rows', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'layered-exec-'))
+  try {
+    await writeFile(join(target, 'agent.cordis.yml'), fixture)
+    const exec = normalizePatchProfile({
+      from: 'fixture',
+      backend: 'layered',
+      mode: 'anchored',
+      hooks: {
+        toolExecution: {
+          deliberationGate: { enabled: true, minChars: 200, maxGatesPerTurn: 2, gateText: 'Plan before retry.' },
+          cotDrip: { enabled: true, every: 2, maxPerTurn: 1, text: 'Stay on plan.' },
+        },
+      },
+    })
+    const dry = await applyLayeredPatch({ target, profile: exec, dryRun: true })
+    assert.ok(dry.plan.filesToCopy.includes('deliberation-gate.mjs'))
+    assert.ok(dry.plan.filesToCopy.includes('cot-drip.mjs'))
+    const ids = [...dry.composition.matchAll(/- id: (deliberation-gate|cot-drip)/g)].map((match) => match[1])
+    assert.deepEqual(ids, ['deliberation-gate', 'cot-drip'])
+    const gateBlock = dry.composition.slice(dry.composition.indexOf('- id: deliberation-gate'), dry.composition.indexOf('- id: cot-drip'))
+    const dripBlock = dry.composition.slice(dry.composition.indexOf('- id: cot-drip'))
+    assert.match(gateBlock, /minChars: 200/)
+    assert.match(gateBlock, /maxGatesPerTurn: 2/)
+    assert.match(gateBlock, /gateText: "Plan before retry."/)
+    assert.match(dripBlock, /every: 2/)
+    assert.match(dripBlock, /maxPerTurn: 1/)
+    assert.match(dripBlock, /text: "Stay on plan."/)
+    const added = dry.ledger.rows.filter((row) => row.id === 'deliberation-gate' || row.id === 'cot-drip')
+    assert.equal(added.length, 2)
+    assert.ok(added.every((row) => row.category === 'added'))
+    assert.ok(added.every((row) => row.sourceHash === null))
+
+    const written = await applyLayeredPatch({ target, profile: exec })
+    assert.equal(written.written, true)
+    const writtenText = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
+    assert.match(writtenText, /- id: deliberation-gate/)
+    assert.match(writtenText, /- id: cot-drip/)
+    for (const id of ['persona', 'mcp-cordis', 'permissions', 'tool-bash', 'platform-guard']) assert.match(writtenText, new RegExp('id: ' + id))
+    for (const file of ['deliberation-gate.mjs', 'cot-drip.mjs']) {
+      assert.equal(await stat(join(target, file)).then(() => true).catch(() => false), true)
+    }
+    const ledgerPath = join(target, '.layered-preservation-ledger.json')
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'))
+    assert.equal(ledger.rows.find((row) => row.id === 'deliberation-gate').category, 'added')
+    assert.equal(ledger.rows.find((row) => row.id === 'cot-drip').category, 'added')
+    assert.equal(ledger.rows.find((row) => row.id === 'persona').category, 'claimed')
+    const again = await applyLayeredPatch({ target, profile: exec })
+    assert.equal(again.verifiedNoOp, true)
   } finally { await rm(target, { recursive: true, force: true }) }
 })
 

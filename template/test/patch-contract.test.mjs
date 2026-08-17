@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   CANONICAL_ROW_ORDER,
+  SUPPORTED_PATCH_LAYERS,
   canonicalRowOrder,
   compileSupportedPatch,
   duplicatePatchRows,
@@ -58,9 +59,36 @@ test('unsupported future layers fail at compile time instead of being ignored', 
   assert.throws(() => compileSupportedPatch(profile), /turnOpening/)
 })
 
+test('layered toolExecution profiles compile without legacy fallback', () => {
+  const profile = normalizePatchProfile({
+    from: 'x',
+    backend: 'layered',
+    mode: 'anchored',
+    hooks: {
+      toolExecution: {
+        deliberationGate: { enabled: true },
+        cotDrip: { enabled: true },
+      },
+    },
+  })
+  const compiled = compileSupportedPatch(profile)
+  assert.equal(compiled.backend, 'layered')
+  assert.equal(profile.hooks.toolExecution.deliberationGate.enabled, true)
+  assert.equal(profile.hooks.toolExecution.cotDrip.enabled, true)
+})
+
 test('session seed cannot silently combine with a live anchor', () => {
   const profile = { ...zero, hooks: { ...zero.hooks, sessionSeed: { enabled: true } } }
   assert.throws(() => normalizePatchProfile(profile), /sessionSeed cannot combine/)
+})
+
+test('toolExecution is a supported layer with deliberation-gate before cot-drip in canonical order', () => {
+  assert.ok(SUPPORTED_PATCH_LAYERS.includes('toolExecution'))
+  const index = (id) => CANONICAL_ROW_ORDER.indexOf(id)
+  assert.ok(index('deliberation-gate') >= 0)
+  assert.ok(index('cot-drip') >= 0)
+  assert.ok(index('deliberation-gate') < index('cot-drip'))
+  assert.ok(index('cot-drip') < index('tool-execution'))
 })
 
 test('canonicalRowOrder keeps context gate outermost', () => {
