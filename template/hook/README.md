@@ -61,11 +61,13 @@ node tools/patch-from-spec.mjs `
 `anchor-bootstrap`；设置 `backend: layered` 时，当前已真正生成独立的
 `context-gate`、`tool-bootstrap`/`zero-tool-bootstrap`、`anchor-turn`、
 `instruction-hint`、`dev-tool-search`、`skill-search` rows，并复制对应的
-shared hook 文件。`turnOpening` 现在也是 layered 后端支持的一层：`kind:
-think` 渲染/复制 `think-phase.mjs`，`kind: wire-think` 渲染/复制
-`toolchoice-adapter.mjs`（必须排在 `wire-think.mjs` 之前）和
-`wire-think.mjs`，并要求 `wire-think` 的 `provider` 与
-`defaultProvider` 不同。`toolExecution`、`sessionSeed`、`gateway`
+shared hook 文件。`turnOpening` 现在也是 layered 后端支持的一层，当前只允许
+`mode: anchored`：`kind: think` 渲染/复制 `think-phase.mjs`；`kind: wire-think`
+渲染/复制 `toolchoice-adapter.mjs`（必须排在 `wire-think.mjs` 之前，且该行的
+`provider` 与 `wire-think` 行使用同一个 sibling provider）和 `wire-think.mjs`，
+并要求 `wire-think` 的 `provider` 与 `defaultProvider` 不同；`mode: zero` /
+`whoami` 与 `turnOpening` 组合会 fail-loud。`toolExecution`、`sessionSeed`、
+`gateway`
 仍会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
 `patch-preset-in-place.mjs` 默认行为保持不变。
 重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许

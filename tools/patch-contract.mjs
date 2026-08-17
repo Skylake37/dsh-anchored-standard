@@ -191,10 +191,10 @@ export function normalizePatchProfile(input) {
   if (!new Set(['every-turn', 'first-turn']).has(turnMode)) throw new TypeError('patch.hooks.turnOpening.mode is invalid')
   const turnIncludeSubagents = boolean(turnOpening.includeSubagents, 'patch.hooks.turnOpening.includeSubagents', sessionPhase.includeSubagents === true)
   const turnSuppressedSources = stringList(turnOpening.suppressedContextSources, 'patch.hooks.turnOpening.suppressedContextSources', ['skill-catalog', 'agent-instructions'])
-  const turnProvider = turnOpening.provider ?? 'deepseek-wire-think'
-  const turnDefaultProvider = turnOpening.defaultProvider ?? 'deepseek-official'
+  const turnProvider = turnOpening.provider === undefined ? 'deepseek-wire-think' : string(turnOpening.provider, 'patch.hooks.turnOpening.provider')
+  const turnDefaultProvider = turnOpening.defaultProvider === undefined ? 'deepseek-official' : string(turnOpening.defaultProvider, 'patch.hooks.turnOpening.defaultProvider')
   if (turnKind === 'wire-think' && turnProvider === turnDefaultProvider) throw new TypeError('wire-think provider and defaultProvider must differ')
-  const turnSteerText = turnOpening.steerText
+  const turnSteerText = turnOpening.steerText === undefined ? undefined : string(turnOpening.steerText, 'patch.hooks.turnOpening.steerText')
 
   const toolExecution = object(hooks.toolExecution, 'patch.hooks.toolExecution')
   rejectUnknown(toolExecution, new Set(['enabled', 'deliberationGate', 'cotDrip']), 'patch.hooks.toolExecution')
@@ -223,6 +223,7 @@ export function normalizePatchProfile(input) {
   }
   if (unsupported.sessionSeed && anchorKind !== 'none') throw new TypeError('sessionSeed cannot combine with a live zero/whoami anchor')
   if (turnEnabled && backend !== 'layered') throw new TypeError('think-phase and wire-think are not part of the legacy patch backend')
+  if (turnEnabled && backend === 'layered' && mode !== 'anchored') throw new TypeError('turnOpening requires anchored mode in the layered backend')
   if (deliberationEnabled) throw new TypeError('deliberation-gate is not part of the layered patch backend')
   if (cotEnabled) throw new TypeError('cot-drip is not part of the layered patch backend')
   if (unsupported.sessionSeed) throw new TypeError('prefab is not part of the layered patch backend')
@@ -313,8 +314,10 @@ export function duplicatePatchRows(composition, profile) {
   if (normalized.hooks.anchor.kind !== 'none') claims.add('anchor-turn')
   if (normalized.hooks.turnOpening.enabled) {
     // think-phase and wire-think are the same turnOpening union: a profile may
-    // select only one, so any pre-existing think OR wire row in the source is a
-    // competing hook and must fail loud rather than silently duplicate.
+    // select only one, so any pre-existing think or wire row in the source is a
+    // competing hook. An existing anchor-turn is also a competing turn-opening
+    // mechanism for an anchored think/wire patch and must fail loud.
+    claims.add('anchor-turn')
     claims.add('think-phase')
     claims.add('wire-think')
     if (normalized.hooks.turnOpening.kind === 'wire-think') claims.add('toolchoice-adapter')

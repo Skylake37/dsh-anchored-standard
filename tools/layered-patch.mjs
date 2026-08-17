@@ -128,6 +128,8 @@ export function buildLayeredRows(profile, bootstrapTools) {
         '# toolchoice-adapter must precede wire-think in the local composition',
         '- id: toolchoice-adapter',
         '  name: ./toolchoice-adapter.mjs',
+        '  config:',
+        `    provider: ${yamlString(turnOpening.provider)}`,
       ].join('\n'))
     }
     const rowId = turnOpening.kind === 'think' ? 'think-phase' : 'wire-think'

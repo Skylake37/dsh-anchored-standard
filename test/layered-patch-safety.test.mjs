@@ -32,18 +32,22 @@ test('layered turnOpening is accepted while other future mechanisms still fail',
   assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
   assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'legacy', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /think-phase/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', mode: 'zero', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', mode: 'whoami', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'through' } } }), /kind is invalid/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 42, defaultProvider: 'deepseek-official' } } }), /provider/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think', steerText: '' } } }), /steerText/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { sessionSeed: { enabled: true } } }), /prefab/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { gateway: { enabled: true } } }), /gateway/)
 })
 
 test('think-phase and wire-think are competing turn-opening rows in existing sources', () => {
-  const source = '- id: think-phase\n  name: ./think-phase.mjs\n- id: toolchoice-adapter\n  name: ./toolchoice-adapter.mjs\n- id: wire-think\n  name: ./wire-think.mjs\n'
+  const source = '- id: anchor-turn\n  name: ./anchor-turn.mjs\n- id: think-phase\n  name: ./think-phase.mjs\n- id: toolchoice-adapter\n  name: ./toolchoice-adapter.mjs\n- id: wire-think\n  name: ./wire-think.mjs\n'
   const think = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } })
   const wire = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
-  assert.deepEqual(duplicatePatchRows(source, think).sort(), ['think-phase', 'wire-think'])
-  assert.deepEqual(duplicatePatchRows(source, wire).sort(), ['think-phase', 'toolchoice-adapter', 'wire-think'])
+  assert.deepEqual(duplicatePatchRows(source, think).sort(), ['anchor-turn', 'think-phase', 'wire-think'])
+  assert.deepEqual(duplicatePatchRows(source, wire).sort(), ['anchor-turn', 'think-phase', 'toolchoice-adapter', 'wire-think'])
 })
 
 
@@ -57,15 +61,18 @@ test('layered think and wire patches render/copy independent rows and files', as
     assert.ok(!thinkDry.plan.filesToCopy.includes('wire-think.mjs'))
     assert.deepEqual([...thinkDry.composition.matchAll(/- id: (think-phase|wire-think|toolchoice-adapter)/g)].map((match) => match[1]), ['think-phase'])
 
-    const wire = normalizePatchProfile({ from: 'fixture', backend: 'layered', mode: 'anchored', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
+    const wire = normalizePatchProfile({ from: 'fixture', backend: 'layered', mode: 'anchored', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'ptc-wire-think', defaultProvider: 'deepseek-official' } } })
     const wireDry = await applyLayeredPatch({ target, profile: wire, dryRun: true })
     assert.ok(wireDry.plan.filesToCopy.includes('toolchoice-adapter.mjs'))
     assert.ok(wireDry.plan.filesToCopy.includes('wire-think.mjs'))
     assert.ok(!wireDry.plan.filesToCopy.includes('think-phase.mjs'))
     const ids = [...wireDry.composition.matchAll(/- id: (toolchoice-adapter|wire-think|think-phase)/g)].map((match) => match[1])
     assert.deepEqual(ids, ['toolchoice-adapter', 'wire-think'])
-    assert.match(wireDry.composition, /provider: "deepseek-wire-think"/)
-    assert.match(wireDry.composition, /defaultProvider: "deepseek-official"/)
+    const adapterBlock = wireDry.composition.slice(wireDry.composition.indexOf('- id: toolchoice-adapter'), wireDry.composition.indexOf('- id: wire-think'))
+    const wireBlock = wireDry.composition.slice(wireDry.composition.indexOf('- id: wire-think'))
+    assert.match(adapterBlock, /provider: "ptc-wire-think"/)
+    assert.match(wireBlock, /provider: "ptc-wire-think"/)
+    assert.match(wireBlock, /defaultProvider: "deepseek-official"/)
 
     const wireWritten = await applyLayeredPatch({ target, profile: wire })
     assert.equal(wireWritten.written, true)

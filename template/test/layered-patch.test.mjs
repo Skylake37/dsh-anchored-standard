@@ -40,19 +40,26 @@ test('buildLayeredRows keeps think and wire-think mutually exclusive with toolch
   assert.doesNotMatch(thinkRows, /- id: wire-think/)
   assert.doesNotMatch(thinkRows, /- id: toolchoice-adapter/)
 
-  const wire = normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
+  const wire = normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'ptc-wire-think', defaultProvider: 'deepseek-official' } } })
   const wireRows = buildLayeredRows(wire, ['bash', 'str_replace_editor'])
   assert.match(wireRows, /- id: toolchoice-adapter/)
   assert.match(wireRows, /- id: wire-think/)
   assert.doesNotMatch(wireRows, /- id: think-phase/)
   assert.ok(wireRows.indexOf('- id: toolchoice-adapter') < wireRows.indexOf('- id: wire-think'))
+  const adapterBlock = wireRows.slice(wireRows.indexOf('- id: toolchoice-adapter'), wireRows.indexOf('- id: wire-think'))
+  const wireBlock = wireRows.slice(wireRows.indexOf('- id: wire-think'))
+  assert.match(adapterBlock, /provider: "ptc-wire-think"/)
+  assert.match(wireBlock, /provider: "ptc-wire-think"/)
+  assert.match(wireBlock, /defaultProvider: "deepseek-official"/)
 })
 
 test('layered turnOpening accepts think and wire-think while other future mechanisms are rejected', () => {
   const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
   assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
   assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
+  assert.throws(() => normalizePatchProfile({ ...base, mode: 'zero', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /requires anchored mode/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 42, defaultProvider: 'deepseek-official' } } }), /provider/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { sessionSeed: { enabled: true } } }), /prefab/)
   assert.throws(() => normalizePatchProfile({ ...base, hooks: { gateway: { enabled: true } } }), /gateway/)
 })
