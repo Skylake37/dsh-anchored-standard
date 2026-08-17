@@ -77,6 +77,8 @@ installed presets.
 - `tools/make-anchored-preset.mjs` — generate a new preset from a source id/dir.
 - `tools/patch-preset-in-place.mjs` — patch an existing preset dir in place;
   writes `HOOK-INSTALL.md` beside its `agent.cordis.yml`.
+- `tools/patch-from-spec.mjs` — apply the validated patch contract to an existing
+  preset; currently compiles session-phase layers and fails loudly for future layers.
 
 Installed preset records (outside this repo, referenced by path):
 

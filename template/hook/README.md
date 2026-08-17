@@ -47,6 +47,21 @@ patch:
 ```
 
 生成器负责编译 canonical row 顺序并做组合校验；用户不应手工排列 waterfall。
+
+当前第一版可执行入口：
+
+```pwsh
+node tools/patch-from-spec.mjs `
+  --target <existing-preset-dir> `
+  --patch <patch.json> `
+  --dry-run
+```
+
+目前 compiler 已支持 `sessionPhase`、`contextGate`、`toolBootstrap`、`anchor`、
+`instructionHint` 这组 session-phase patch，并把它们编译到当前
+`anchor-bootstrap` 过渡实现；`turnOpening`、`toolExecution`、`sessionSeed`、
+`gateway` 会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
+`patch-preset-in-place.mjs` 默认行为保持不变。
 重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许
 `sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥；
 `eternal-minimal` 不进入普通 promotion phase。当前 `anchor-bootstrap.mjs` 是
