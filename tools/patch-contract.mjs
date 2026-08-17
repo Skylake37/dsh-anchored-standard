@@ -216,6 +216,11 @@ export function normalizePatchProfile(input) {
     gateway: enabled(gateway, 'patch.hooks.gateway'),
   }
   if (unsupported.sessionSeed && anchorKind !== 'none') throw new TypeError('sessionSeed cannot combine with a live zero/whoami anchor')
+  if (turnEnabled) throw new TypeError('think-phase and wire-think are not part of the layered patch backend')
+  if (deliberationEnabled) throw new TypeError('deliberation-gate is not part of the layered patch backend')
+  if (cotEnabled) throw new TypeError('cot-drip is not part of the layered patch backend')
+  if (unsupported.sessionSeed) throw new TypeError('prefab is not part of the layered patch backend')
+  if (unsupported.gateway) throw new TypeError('gateway is not part of the layered patch backend')
 
   return Object.freeze({
     apiVersion,

@@ -1,6 +1,6 @@
 /** Compile/apply the independent upstream-style hook rows. */
 
-import { readFile, stat, writeFile, mkdir, copyFile } from 'node:fs/promises'
+import { readFile, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,7 +12,8 @@ import {
   insertBootstrapRow,
   stampMinimalToolRows,
 } from './make-anchored-preset.mjs'
-import { duplicatePatchRows } from './patch-contract.mjs'
+import { duplicatePatchRows, CANONICAL_ROW_ORDER } from './patch-contract.mjs'
+import { sha256, targetPreconditionHash, buildLedger, assertCanonicalRowOrder, rowIds, canonicalizeComposition } from './preservation-ledger.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = dirname(HERE)
@@ -43,9 +44,7 @@ function yamlString(value) {
 
 function anchorText(profile) {
   if (profile.hooks.anchor.text !== undefined) return profile.hooks.anchor.text
-  return profile.mode === 'whoami'
-    ? '你是谁'
-    : 'This round is a test. Tools are not open yet; all tools will open next round.'
+  return profile.mode === 'whoami' ? 'You are who you are' : 'This round is a test. Tools are not open yet; all tools will open next round.'
 }
 
 /** Render independent rows in canonical patch order. */
@@ -181,7 +180,7 @@ async function isDirectory(path) {
 }
 
 /** Apply a layered patch to an existing preset without replacing source rows. */
-export async function applyLayeredPatch({ target: rawTarget, profile, winBashPath, dryRun = false }) {
+async function applyLayeredPatchLegacy({ target: rawTarget, profile, winBashPath, dryRun = false }) {
   const target = resolve(rawTarget)
   if (!(await isDirectory(target))) throw new Error(`target preset directory not found: ${target}`)
   const compositionPath = join(target, COMPOSITION)
@@ -232,4 +231,45 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
     '',
   ].join('\n'))
   return { plan, written: true, recordPath, composition: finalComposition }
+}
+
+
+/** Safe layered backend: plan first, then commit all outputs with rollback. */
+export async function applyLayeredPatch({ target: rawTarget, profile, winBashPath, dryRun = false }) {
+  const target = resolve(rawTarget)
+  if (!(await isDirectory(target))) throw new Error(`target preset directory not found: ${target}`)
+  const compositionPath = join(target, COMPOSITION)
+  const composition = canonicalizeComposition(await readFile(compositionPath, 'utf8'))
+  const files = layerFileNames(profile)
+  const ledgerPath = join(target, '.layered-preservation-ledger.json')
+  const existingLedger = await readFile(ledgerPath, 'utf8').catch(() => null)
+  const sourceHash = sha256(composition)
+  const profileHash = sha256(JSON.stringify(profile))
+  const targetHash = await targetPreconditionHash(target, COMPOSITION, files)
+  if (existingLedger) {
+    try { const old = JSON.parse(existingLedger); if (old.finalCompositionHash === sourceHash && old.profileHash === profileHash) return { written: false, verifiedNoOp: true, plan: old.plan, ledger: old } } catch {}
+  }
+  const duplicates = duplicatePatchRows(composition, profile)
+  if (duplicates.length) throw new Error(`target already mounts conflicting hook row(s): ${duplicates.join(', ')}`)
+  const bootstrapTools = detectBootstrapTools(composition) ?? ['bash', 'str_replace_editor']
+  const stamped = stampMinimalToolRows(composition, bootstrapTools, { winBashPath })
+  let finalComposition = stamped.composition
+  const disabledSourceRows = []
+  for (const sourceRow of ['agent-instructions', 'tool-skill']) { const disabled = disableRow(finalComposition, sourceRow); if (disabled.disabled) { finalComposition = disabled.composition; disabledSourceRows.push(sourceRow) } }
+  const rows = buildLayeredRows(profile, bootstrapTools)
+  finalComposition = canonicalizeComposition(insertBootstrapRow(finalComposition, rows))
+  assertCanonicalRowOrder(finalComposition, ['context-gate', 'tool-bootstrap', 'zero-tool-bootstrap', 'anchor-turn', 'anchor-bootstrap', 'instruction-hint', 'dev-tool-search', 'skill-search'])
+  const finalRows = rowIds(finalComposition)
+  const plan = { target, backend: 'layered', mode: profile.mode, bootstrapTools, disabledSourceRows, appendedToolGroups: stamped.appended, filesToCopy: files, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash }
+  const patchHash = sha256(JSON.stringify(profile) + '\n' + rows)
+  const finalCompositionHash = sha256(finalComposition)
+  const ledger = buildLedger({ sourceRows: rowIds(composition), targetRows: rowIds(composition), finalRows, addedFiles: files, disabledRows: disabledSourceRows })
+  const result = { plan, ledger, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash, composition: finalComposition, written: false }
+  if (dryRun) return result
+  const outputs = new Map([[compositionPath, finalComposition], [ledgerPath, JSON.stringify({ ...ledger, plan, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash }, null, 2) + '\n'], [join(target, 'HOOK-INSTALL-LAYERED.md'), `# Layered hook patch record\n\n- backend: layered\n- patch hash: ${patchHash}\n- source precondition hash: ${sourceHash}\n- target precondition hash: ${targetHash}\n- final composition hash: ${finalCompositionHash}\n- row ledger: .layered-preservation-ledger.json\n`]])
+  for (const name of files) outputs.set(join(target, name), await readFile(join(ROOT, SOURCE_FILES[name]), 'utf8'))
+  const backups = new Map()
+  try { for (const file of outputs.keys()) backups.set(file, await readFile(file).catch(() => null)); for (const [file, data] of outputs) await writeFile(file, data) }
+  catch (error) { for (const [file, data] of backups) { if (data === null) await rm(file, { force: true }).catch(() => {}); else await writeFile(file, data) } throw new Error(`layered patch rolled back: ${error.message}`) }
+  return { ...result, written: true, recordPath: join(target, 'HOOK-INSTALL-LAYERED.md') }
 }
