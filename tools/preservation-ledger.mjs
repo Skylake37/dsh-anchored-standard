@@ -20,11 +20,25 @@ export async function targetPreconditionHash(target, compositionFile, hookFiles 
   for (const name of names) parts.push(name + ':' + (await fileHash(join(target, name)) ?? '<missing>'))
   return sha256(parts.join('\n'))
 }
-export function buildLedger({ sourceRows, targetRows, finalRows, addedFiles = [], disabledRows = [], replacedRows = [] }) {
+function rowBlocks(composition = '') {
+  const lines = composition.replace(/\r\n/g, '\n').split('\n')
+  const blocks = new Map()
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^\s*- id:\s*([^\s#]+)/)
+    if (!match) continue
+    let end = i + 1
+    while (end < lines.length && !/^\s*- id:\s*/.test(lines[end])) end++
+    blocks.set(match[1], lines.slice(i, end).join('\n').trimEnd() + '\n')
+  }
+  return blocks
+}
+
+export function buildLedger({ sourceRows, targetRows, finalRows, sourceComposition = '', finalComposition = '', addedFiles = [], disabledRows = [], replacedRows = [] }) {
   const source = new Set(sourceRows), target = new Set(targetRows), final = new Set(finalRows)
+  const sourceBlocks = rowBlocks(sourceComposition), finalBlocks = rowBlocks(finalComposition)
   const rows = []
-  for (const id of sourceRows) rows.push({ id, category: disabledRows.includes(id) ? 'disabled' : replacedRows.includes(id) ? 'replaced' : 'claimed', source: true, target: target.has(id), final: final.has(id) })
-  for (const id of finalRows) if (!source.has(id)) rows.push({ id, category: 'added', source: false, target: target.has(id), final: true })
+  for (const id of sourceRows) rows.push({ id, category: disabledRows.includes(id) ? 'disabled' : replacedRows.includes(id) ? 'replaced' : 'claimed', source: true, target: target.has(id), final: final.has(id), sourceHash: sourceBlocks.has(id) ? sha256(sourceBlocks.get(id)) : null, finalHash: finalBlocks.has(id) ? sha256(finalBlocks.get(id)) : null })
+  for (const id of finalRows) if (!source.has(id)) rows.push({ id, category: 'added', source: false, target: target.has(id), final: true, sourceHash: null, finalHash: finalBlocks.has(id) ? sha256(finalBlocks.get(id)) : null })
   return Object.freeze({ version: LEDGER_VERSION, rows, files: addedFiles.map((path) => ({ path, category: 'added' })) })
 }
 export function assertCanonicalRowOrder(composition, order) {

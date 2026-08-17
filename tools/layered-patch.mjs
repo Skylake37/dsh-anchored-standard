@@ -180,60 +180,6 @@ async function isDirectory(path) {
 }
 
 /** Apply a layered patch to an existing preset without replacing source rows. */
-async function applyLayeredPatchLegacy({ target: rawTarget, profile, winBashPath, dryRun = false }) {
-  const target = resolve(rawTarget)
-  if (!(await isDirectory(target))) throw new Error(`target preset directory not found: ${target}`)
-  const compositionPath = join(target, COMPOSITION)
-  const composition = await readFile(compositionPath, 'utf8')
-  const duplicates = duplicatePatchRows(composition, profile)
-  if (duplicates.length > 0) throw new Error(`target already mounts conflicting hook row(s): ${duplicates.join(', ')}`)
-
-  const bootstrapTools = detectBootstrapTools(composition) ?? ['bash', 'str_replace_editor']
-  const stamped = stampMinimalToolRows(composition, bootstrapTools, { winBashPath })
-  let finalComposition = stamped.composition
-  const disabledSourceRows = []
-  for (const sourceRow of ['agent-instructions', 'tool-skill']) {
-    const disabled = disableRow(finalComposition, sourceRow)
-    if (disabled.disabled) {
-      finalComposition = disabled.composition
-      disabledSourceRows.push(sourceRow)
-    }
-  }
-  const rows = buildLayeredRows(profile, bootstrapTools)
-  finalComposition = insertBootstrapRow(finalComposition, rows)
-
-  const plan = {
-    target,
-    backend: 'layered',
-    mode: profile.mode,
-    bootstrapTools,
-    disabledSourceRows,
-    appendedToolGroups: stamped.appended,
-    filesToCopy: layerFileNames(profile),
-  }
-  if (dryRun) return { plan, written: false, composition: finalComposition }
-
-  await writeFile(compositionPath, finalComposition)
-  const copied = await copyLayerFiles(target, profile)
-  const recordPath = join(target, 'HOOK-INSTALL-LAYERED.md')
-  await writeFile(recordPath, [
-    '# Layered hook patch record',
-    '',
-    `- backend: layered`,
-    `- mode: ${profile.mode}`,
-    `- source: ${profile.from}`,
-    `- files copied: ${copied.join(', ')}`,
-    `- disabled source rows: ${disabledSourceRows.length > 0 ? disabledSourceRows.join(', ') : 'none'}`,
-    `- appended tool groups: ${stamped.appended.length > 0 ? stamped.appended.join(', ') : 'none'}`,
-    '',
-    'This patch preserves source rows except the explicitly claimed instruction/tool-skill',
-    'injection layer and the bootstrap tool rows required to expose the declared surface.',
-    '',
-  ].join('\n'))
-  return { plan, written: true, recordPath, composition: finalComposition }
-}
-
-
 /** Safe layered backend: plan first, then commit all outputs with rollback. */
 export async function applyLayeredPatch({ target: rawTarget, profile, winBashPath, dryRun = false }) {
   const target = resolve(rawTarget)
@@ -263,7 +209,7 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
   const plan = { target, backend: 'layered', mode: profile.mode, bootstrapTools, disabledSourceRows, appendedToolGroups: stamped.appended, filesToCopy: files, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash }
   const patchHash = sha256(JSON.stringify(profile) + '\n' + rows)
   const finalCompositionHash = sha256(finalComposition)
-  const ledger = buildLedger({ sourceRows: rowIds(composition), targetRows: rowIds(composition), finalRows, addedFiles: files, disabledRows: disabledSourceRows })
+  const ledger = buildLedger({ sourceRows: rowIds(composition), targetRows: rowIds(composition), finalRows, sourceComposition: composition, finalComposition, addedFiles: files, disabledRows: disabledSourceRows })
   const result = { plan, ledger, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash, composition: finalComposition, written: false }
   if (dryRun) return result
   const outputs = new Map([[compositionPath, finalComposition], [ledgerPath, JSON.stringify({ ...ledger, plan, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash }, null, 2) + '\n'], [join(target, 'HOOK-INSTALL-LAYERED.md'), `# Layered hook patch record\n\n- backend: layered\n- patch hash: ${patchHash}\n- source precondition hash: ${sourceHash}\n- target precondition hash: ${targetHash}\n- final composition hash: ${finalCompositionHash}\n- row ledger: .layered-preservation-ledger.json\n`]])
