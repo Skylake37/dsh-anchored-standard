@@ -7,7 +7,7 @@ import { normalizePatchProfile } from '../tools/patch-contract.mjs'
 import { applyLayeredPatch } from '../tools/layered-patch.mjs'
 import { buildLedger, sha256 } from '../tools/preservation-ledger.mjs'
 
-const fixture = ['- id: persona', '  name: ./persona.mjs', '- id: mcp-cordis', '  name: ./mcp-cordis.mjs', '- id: permissions', '  name: ./permissions.mjs', '- id: tool-bash', '  name: ./tool-bash.mjs', '- id: platform-guard', '  name: ./platform-guard.mjs', ''].join('\n')
+const fixture = ['- id: agent-instructions', '  name: ./agent-instructions.mjs', '- id: persona', '  name: ./persona.mjs', '- id: mcp-cordis', '  name: ./mcp-cordis.mjs', '- id: permissions', '  name: ./permissions.mjs', '- id: tool-bash', "  name: '@deepseek-ai/dsh-tool-bash'", '- id: platform-guard', '  name: ./platform-guard.mjs', ''].join('\n')
 function profile() { return normalizePatchProfile({ from: 'fixture', backend: 'layered', mode: 'anchored' }) }
 
 test('layered dry-run and apply share hashes and preserve undeclared rows', async () => {
@@ -19,6 +19,8 @@ test('layered dry-run and apply share hashes and preserve undeclared rows', asyn
     const applied = await applyLayeredPatch({ target, profile: p })
     assert.equal(dry.finalCompositionHash, applied.finalCompositionHash)
     assert.equal(dry.patchHash, applied.patchHash)
+    assert.equal(applied.ledger.rows.find((row) => row.id === 'agent-instructions').category, 'disabled')
+    assert.equal(applied.ledger.rows.find((row) => row.id === 'tool-bash').category, 'replaced')
     const text = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
     for (const id of ['persona', 'mcp-cordis', 'permissions', 'tool-bash', 'platform-guard']) assert.match(text, new RegExp('id: ' + id))
     const again = await applyLayeredPatch({ target, profile: p })
@@ -42,3 +44,4 @@ test('ledger records disabled and replaced rows with per-row source/final hashes
   assert.equal(ledger.rows[0].sourceHash, sha256('- id: agent-instructions\n  name: ./agent-instructions.mjs\n'))
   assert.notEqual(ledger.rows[1].sourceHash, ledger.rows[1].finalHash)
 })
+

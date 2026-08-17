@@ -53,7 +53,7 @@ export function buildLayeredRows(profile, bootstrapTools) {
   const rows = []
   const turnOpening = profile.hooks.turnOpening
   rows.push([
-    '# ── context-gate (layered patch; must remain FIRST) ──',
+    '# 鈹€鈹€ context-gate (layered patch; must remain FIRST) 鈹€鈹€',
     '- id: context-gate',
     '  name: ./context-gate.mjs',
     '  config:',
@@ -202,14 +202,15 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
   let finalComposition = stamped.composition
   const disabledSourceRows = []
   for (const sourceRow of ['agent-instructions', 'tool-skill']) { const disabled = disableRow(finalComposition, sourceRow); if (disabled.disabled) { finalComposition = disabled.composition; disabledSourceRows.push(sourceRow) } }
+  const replacedSourceRows = stamped.toolBashDisabled ? ['tool-bash'] : []
   const rows = buildLayeredRows(profile, bootstrapTools)
   finalComposition = canonicalizeComposition(insertBootstrapRow(finalComposition, rows))
   assertCanonicalRowOrder(finalComposition, ['context-gate', 'tool-bootstrap', 'zero-tool-bootstrap', 'anchor-turn', 'anchor-bootstrap', 'instruction-hint', 'dev-tool-search', 'skill-search'])
   const finalRows = rowIds(finalComposition)
-  const plan = { target, backend: 'layered', mode: profile.mode, bootstrapTools, disabledSourceRows, appendedToolGroups: stamped.appended, filesToCopy: files, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash }
+  const plan = { target, backend: 'layered', mode: profile.mode, bootstrapTools, disabledSourceRows, replacedSourceRows, appendedToolGroups: stamped.appended, filesToCopy: files, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash }
   const patchHash = sha256(JSON.stringify(profile) + '\n' + rows)
   const finalCompositionHash = sha256(finalComposition)
-  const ledger = buildLedger({ sourceRows: rowIds(composition), targetRows: rowIds(composition), finalRows, sourceComposition: composition, finalComposition, addedFiles: files, disabledRows: disabledSourceRows })
+  const ledger = buildLedger({ sourceRows: rowIds(composition), targetRows: rowIds(composition), finalRows, sourceComposition: composition, finalComposition, addedFiles: files, disabledRows: disabledSourceRows, replacedRows: replacedSourceRows })
   const result = { plan, ledger, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash, composition: finalComposition, written: false }
   if (dryRun) return result
   const outputs = new Map([[compositionPath, finalComposition], [ledgerPath, JSON.stringify({ ...ledger, plan, profileHash, patchHash, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash, finalCompositionHash }, null, 2) + '\n'], [join(target, 'HOOK-INSTALL-LAYERED.md'), `# Layered hook patch record\n\n- backend: layered\n- patch hash: ${patchHash}\n- source precondition hash: ${sourceHash}\n- target precondition hash: ${targetHash}\n- final composition hash: ${finalCompositionHash}\n- row ledger: .layered-preservation-ledger.json\n`]])
@@ -219,3 +220,4 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
   catch (error) { for (const [file, data] of backups) { if (data === null) await rm(file, { force: true }).catch(() => {}); else await writeFile(file, data) } throw new Error(`layered patch rolled back: ${error.message}`) }
   return { ...result, written: true, recordPath: join(target, 'HOOK-INSTALL-LAYERED.md') }
 }
+
