@@ -5,8 +5,10 @@ import { apply, name } from '../hook/instruction-hint.mjs'
 
 function register(config = { promoteOn: 'assistant-message' }) {
   let listener
+  let sessionEvent
   const ctx = {
     on(event, callback) {
+      if (event === 'session/event') sessionEvent = callback
       if (event === 'agent/pre-step') listener = callback
     },
     get(service) {
@@ -21,6 +23,7 @@ function register(config = { promoteOn: 'assistant-message' }) {
   }
   apply(ctx, config)
   assert.equal(typeof listener, 'function')
+  listener.observe = (...args) => sessionEvent?.(...args)
   return listener
 }
 
@@ -48,6 +51,27 @@ test('post-promotion pre-step injects neutral tool guidance even without instruc
   assert.doesNotMatch(text, /Do NOT assume their content/)
   assert.doesNotMatch(text, /read the relevant instruction files first and follow them/)
   assert.doesNotMatch(text, /before doing work with bash or str_replace_editor, check dev_tool_search/)
+})
+
+
+test('durable hint event prevents reinjection after a simulated restart', async () => {
+  const session = { id: 'restart-session', events: [{ type: 'assistant/message' }], header: { cwd: 'C:\\nonexistent', delegationDepth: 0 } }
+  const first = register()
+  const firstDecision = await first(
+    { agent: { session } },
+    async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
+  )
+  const hint = firstDecision.messages.find((message) => message.id?.startsWith('instruction-hint-'))
+  assert.ok(hint)
+  session.events.push({ type: 'user/message', data: { source: { kind: 'instruction-hint' } } })
+  first.observe(session, session.events.at(-1))
+
+  const restarted = register()
+  const restartedDecision = await restarted(
+    { agent: { session } },
+    async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
+  )
+  assert.equal(restartedDecision.messages.some((message) => message.id?.startsWith('instruction-hint-')), false)
 })
 
 test('pre-promotion pre-step injects nothing', async () => {

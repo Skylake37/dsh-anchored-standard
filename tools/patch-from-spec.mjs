@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url'
 
 import { loadTemplateDefaults } from './make-anchored-preset.mjs'
 import { compileSupportedPatch, normalizePatchProfile } from './patch-contract.mjs'
+import { applyLayeredPatch } from './layered-patch.mjs'
 import { patchPresetInPlace } from './patch-preset-in-place.mjs'
 
 function parseArgs(argv) {
@@ -38,6 +39,10 @@ export async function applyPatchSpec(options) {
   const raw = JSON.parse(await readFile(resolve(options.patch), 'utf8'))
   const profile = normalizePatchProfile(raw)
   const compiled = compileSupportedPatch(profile)
+  if (profile.backend === 'layered') {
+    const result = await applyLayeredPatch({ target: options.target, profile, dryRun: options.dryRun === true })
+    return { profile, compiled, result }
+  }
   const defaults = await loadTemplateDefaults()
   const result = await patchPresetInPlace({
     target: options.target,
@@ -74,6 +79,7 @@ if (isMain) {
     const { profile, compiled, result } = await applyPatchSpec(options)
     process.stdout.write(`${result.written ? 'patched' : 'would patch'} preset\n`)
     process.stdout.write(`source: ${profile.from}\n`)
+    process.stdout.write(`backend: ${profile.backend}\n`)
     process.stdout.write(`mode: ${compiled.mode}\n`)
     process.stdout.write(`layers: sessionPhase, contextGate, toolBootstrap, anchor, instructionHint\n`)
     if (result.recordPath !== undefined) process.stdout.write(`record: ${result.recordPath}\n`)

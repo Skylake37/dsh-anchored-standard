@@ -104,9 +104,11 @@ function enabled(value, field) {
 export function normalizePatchProfile(input) {
   const root = object(input, 'patch')
   const source = root.patch === undefined ? root : object(root.patch, 'patch.patch')
-  rejectUnknown(source, new Set(['apiVersion', 'from', 'to', 'name', 'description', 'mode', 'preserve', 'hooks']), 'patch')
+  rejectUnknown(source, new Set(['apiVersion', 'backend', 'from', 'to', 'name', 'description', 'mode', 'preserve', 'hooks']), 'patch')
 
   const apiVersion = source.apiVersion ?? PATCH_API_VERSION
+  const backend = source.backend ?? 'legacy'
+  if (!new Set(['legacy', 'layered']).has(backend)) throw new TypeError('patch.backend must be legacy or layered')
   if (apiVersion !== PATCH_API_VERSION) throw new TypeError(`patch.apiVersion must be ${PATCH_API_VERSION}`)
   const from = string(source.from, 'patch.from')
   const mode = source.mode ?? 'anchored'
@@ -187,6 +189,7 @@ export function normalizePatchProfile(input) {
 
   return Object.freeze({
     apiVersion,
+    backend,
     from,
     to: source.to,
     name: source.name,
@@ -203,7 +206,7 @@ export function normalizePatchProfile(input) {
         enabled: contextGateEnabled,
         runtimeContexts,
         messagePolicy,
-        allowKinds: Object.freeze(stringList(contextGate.allowKinds, 'patch.hooks.contextGate.allowKinds')),
+        allowKinds: Object.freeze(stringList(contextGate.allowKinds, 'patch.hooks.contextGate.allowKinds', ['skill-invocation'])),
         suppressedContextSources: Object.freeze(stringList(contextGate.suppressedContextSources, 'patch.hooks.contextGate.suppressedContextSources', ['agent-instructions', 'skill-catalog'])),
         suppressedContextPlugins: Object.freeze(stringList(contextGate.suppressedContextPlugins, 'patch.hooks.contextGate.suppressedContextPlugins')),
       }),
@@ -224,6 +227,7 @@ export function compileSupportedPatch(profile) {
   if (unsupported.length > 0) throw new Error(`patch layers are not implemented yet: ${unsupported.join(', ')}`)
   const { sessionPhase, contextGate, toolBootstrap, instructionHint } = normalized.hooks
   return Object.freeze({
+    backend: normalized.backend,
     from: normalized.from,
     to: normalized.to,
     name: normalized.name,
@@ -251,7 +255,9 @@ export function canonicalRowOrder(rows = CANONICAL_ROW_ORDER) {
 
 /** Detect duplicate/competing hook rows in a source composition. */
 export function duplicatePatchRows(composition, profile) {
-  const normalized = normalizePatchProfile(profile)
+  const normalized = profile?.hooks?.unsupported !== undefined
+    ? profile
+    : normalizePatchProfile(profile)
   const claims = new Set(['anchor-bootstrap'])
   if (normalized.hooks.contextGate.enabled) claims.add('context-gate')
   if (normalized.hooks.toolBootstrap.firstTurnTools !== undefined) claims.add('tool-bootstrap')

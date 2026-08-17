@@ -139,8 +139,22 @@ export function apply(ctx, config) {
   const promotion = createEpochPromotion(promoteEvents, { includeSubagents })
   ctx.on('session/event', (session, event) => promotion.observe(session, event))
 
-  /** Sessions that already received the hint. */
-  const hinted = new Set()
+  /** Restart-safe durable hint guard, keyed by the session event log. */
+  const hinted = new Map()
+  const hintIsDurable = (session) => {
+    const known = hinted.get(session.id)
+    if (known !== undefined) return known
+    const found = (Array.isArray(session.events) ? session.events : []).some((event) =>
+      event.type === 'user/message' && event.data?.source?.kind === 'instruction-hint',
+    )
+    hinted.set(session.id, found)
+    return found
+  }
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'user/message' && event.data?.source?.kind === 'instruction-hint') {
+      hinted.set(session.id, true)
+    }
+  })
   let warned = false
   const warnOnce = (message) => {
     if (warned) return
@@ -157,8 +171,8 @@ export function apply(ctx, config) {
     try {
       if (promotion.status(agent).promoted !== true) return decision
       const session = agent.session
-      if (session === undefined || hinted.has(session.id)) return decision
-      hinted.add(session.id)
+      if (session === undefined || hintIsDurable(session)) return decision
+      hinted.set(session.id, true)
 
       const fs = ctx.get('fs')
       if (fs === undefined) return decision

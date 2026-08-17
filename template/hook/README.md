@@ -57,10 +57,12 @@ node tools/patch-from-spec.mjs `
   --dry-run
 ```
 
-目前 compiler 已支持 `sessionPhase`、`contextGate`、`toolBootstrap`、`anchor`、
-`instructionHint` 这组 session-phase patch，并把它们编译到当前
-`anchor-bootstrap` 过渡实现；`turnOpening`、`toolExecution`、`sessionSeed`、
-`gateway` 会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
+`patch.backend` 默认为 `legacy`，继续编译到兼容旧安装态的
+`anchor-bootstrap`；设置 `backend: layered` 时，当前已真正生成独立的
+`context-gate`、`tool-bootstrap`/`zero-tool-bootstrap`、`anchor-turn`、
+`instruction-hint`、`dev-tool-search`、`skill-search` rows，并复制对应的
+shared hook 文件。`turnOpening`、`toolExecution`、`sessionSeed`、`gateway`
+仍会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
 `patch-preset-in-place.mjs` 默认行为保持不变。
 重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许
 `sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥；
