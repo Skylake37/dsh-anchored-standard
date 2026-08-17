@@ -458,7 +458,7 @@ cp -R whoami-standard "$dsh_home/.agent-presets/whoami-standard"
 重启 DeepSeek Harness，新建空白会话，选择 **Whoami Standard (experimental)**，
 然后发送第一条消息——自我介绍轮先跑，你的消息在下一轮带着完整工具被回答。
 
-## Think-Execute Standard（实验）
+
 ## Eternal Minimal（实验）
 
 "让模型以为从未离开极简模式"：模型可见目录整个会话恒等于 Minimal 对
@@ -500,8 +500,58 @@ cp -R eternal-minimal "$dsh_home/.agent-presets/eternal-minimal"
 重启 DeepSeek Harness，新建空白会话，选择 **Eternal Minimal (experimental)**，
 照常工作——模型编写 shell 命令，`dshx …` 行真实运行重型 Standard 工具。
 
-## Deliberation Gate（实验）
+
 ## Wire Think-Execute Standard（实验）
+
+wire 层模式：每轮用户消息先跑一个思考步——请求中工具定义**在场**、wire 层
+禁止调用（`tool_choice: "none"`）——然后一条 steering 通知在官方 provider
+上打开执行阶段，带着 resident 目录。
+
+`tool_choice` 不在 harness `GenerateOptions` 词汇内（官方 deepseek
+adapter 明确标注为 MVP cut），因此需要走受支持的 wire 接缝：
+
+1. **兄弟路由**：`toolchoice-adapter.mjs`（第 1 行）注册一个零依赖的
+   DeepSeek chat-completions adapter，挂在自己的 provider id
+   （`deepseek-wire-think`）下，在工具定义在场时向 wire 放
+   `tool_choice: "none"`。官方 `DeepSeekAdapter` 无法被包装（wire body
+   在私有 generator 里构建），因此该文件 vendor 了官方
+   serialize/SSE/translate 管线的最小协议忠实子集——相同的 assistant
+   消息细节（`content: ""` 永不为 null、`reasoning_content` 只在
+   tool-call 轮回放、工具结果转 `role: "tool"` 并带 `(no output)` 兜底）
+   和相同的 usage/finish 翻译。连接事实的解析顺序是行配置 >
+   `llm-deepseek` settings 段 > 环境变量，与官方行完全一致，同一个
+   `DEEPSEEK_API_KEY` 同时服务两条路由。
+2. **按步路由**：`wire-think.mjs` 保持思考步的组装目录**原样不动**（这
+   正是被复现的条件），只在 `agent/request` 瀑布里换 provider——冻结的
+   loop 内建请求与日志可重建性不变。执行步（以及所有子 agent）被路由
+   回捕获的原始 provider，即使折叠的会话 header 把思考路由播种进了
+   下一步的种子配置。
+3. **Steer + resident**：`agent/turn-stopping` 每轮恰好 steer 一次
+   （从持久 `steering/message` 事件重建，resume 安全），执行步看到晋升
+   的 RESIDENT 集。
+
+降级阶梯：兄弟路由未注册（行被删、或另一个 preset 已挂载同一 id——
+DUPLICATE_ADAPTER 被捕获并告警）时，思考步退回零工具条件——组合
+错误绝不会弄坏会话。`mode: first-turn` 把路由（及其代价）限制在会话的
+首个用户轮。
+
+采用前需要知道的代价：思考/执行交替每轮两次切换请求前缀中的 tools
+块，DeepSeek 前缀缓存从首个变化 token 起失效（provider id 本身对后端
+缓存不可见；发散的是 tools 块）。每次切换追加一条 `request/header`
+变更事件。adapter 行设 `logprobs: true` 可开启 opt-in 研究钩子——
+adapter 请求 token logprobs 并记录每请求均值摘要（harness StreamChunk
+词汇没有 logprob 数据的表面，插件今天能做的只有记日志；这个日志流正是
+离线轨迹分析要消费的东西）。
+
+以独立 preset id 安装：
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/wire-think-standard"
+cp -R wire-think-standard "$dsh_home/.agent-presets/wire-think-standard"
+```
+
 ## Combo Anchored（实验）——插件组合包
 
 "一切皆插件"的展示位：**三个正交锚定机制**以独立行拼装，各自带开关，

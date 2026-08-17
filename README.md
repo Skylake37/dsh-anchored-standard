@@ -552,7 +552,7 @@ Restart DeepSeek Harness, create a blank session, select **Whoami Standard
 runs first, and your message is answered with the full tooling on the next
 turn.
 
-## Think-Execute Standard (experimental)
+
 ## Eternal Minimal (experimental)
 
 The "make the model believe it never left Minimal" mode: the model-visible
@@ -602,8 +602,66 @@ Restart DeepSeek Harness, create a blank session, select **Eternal Minimal
 (experimental)**, then work as usual — the model composes shell commands,
 and `dshx …` lines run the heavier Standard tools for real.
 
-## Deliberation Gate (experimental)
+
 ## Wire Think-Execute Standard (experimental)
+
+The wire-level mode: every user turn opens with one think step that keeps
+tool definitions PRESENT in the request while the wire forbids invocation
+(`tool_choice: "none"`), then a steering notice opens the execute phase on
+the official provider with the resident catalog.
+
+`tool_choice` is outside the harness `GenerateOptions` vocabulary (the
+official deepseek adapter documents the mapping as an MVP cut), so reaching
+this condition takes the sanctioned wire seam:
+
+1. **Sibling route**: `toolchoice-adapter.mjs` (row 1) registers a
+   zero-dependency DeepSeek chat-completions adapter under its OWN provider
+   id (`deepseek-wire-think`) that puts `tool_choice: "none"` on the wire
+   whenever tool definitions are present. The official `DeepSeekAdapter`
+   cannot be wrapped (its wire body is built inside a private generator), so
+   this file vendors a minimal, protocol-faithful subset of the official
+   serialize/SSE/translate pipeline — the same assistant-message nuances
+   (`content: ""` never null, `reasoning_content` replayed only on
+   tool-call turns, tool results as `role: "tool"` with an `(no output)`
+   fallback) and the same usage/finish translation. Connection facts
+   resolve row config > `llm-deepseek` settings section > env, exactly like
+   the official row, so the same `DEEPSEEK_API_KEY` serves both routes.
+2. **Per-step routing**: `wire-think.mjs` keeps the think step's assembled
+   catalog UNTOUCHED (that is the condition being reproduced) and swaps ONLY
+   the provider in the `agent/request` waterfall — the frozen loop-built
+   request and the log-reconstructability invariant are preserved. Execute
+   steps (and every subagent) are routed back to the captured original
+   provider even when the folded session header seeds them with the think
+   route.
+3. **Steer + resident**: `agent/turn-stopping` steers exactly once per turn
+   (resume-safe from durable `steering/message` events), and execute steps
+   see the promoted RESIDENT set.
+
+Degradation ladder: if the sibling route is not registered (row removed, or
+a second preset already mounted the same id — `DUPLICATE_ADAPTER` is caught
+and warned), think steps fall back to the zero-tool condition, so a
+composition mistake can never brick a session. `mode: first-turn` limits the
+routing (and its costs) to the session's first user turn.
+
+Costs to know before adopting: the think/execute alternation switches the
+tools block of the request prefix twice per turn, so DeepSeek prefix-cache
+reuse breaks from the first changed token each switch (provider id itself is
+invisible to the backend cache; the tools block is what diverges). Each swap
+appends a `request/header` change event. Set `logprobs: true` on the adapter
+row for the opt-in research hook — the adapter requests token logprobs and
+logs a per-request mean summary (the harness StreamChunk vocabulary has no
+surface for logprob data, so logging is all a plugin can do today; that log
+stream is exactly what offline trajectory analysis would consume).
+
+Install as a separate preset id:
+
+```sh
+dsh_home="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$dsh_home/.agent-presets"
+test ! -e "$dsh_home/.agent-presets/wire-think-standard"
+cp -R wire-think-standard "$dsh_home/.agent-presets/wire-think-standard"
+```
+
 ## Combo Anchored (experimental) — the combination package
 
 The everything-is-a-plugin showcase: THREE orthogonal anchoring mechanisms
