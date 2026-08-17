@@ -120,12 +120,14 @@ test('zero profile: anchor request is empty and the real message is promoted', a
   assert.deepEqual(names(realRequest).sort(), ['bash', 'dev_tool_search', 'skill_load', 'skill_search', 'str_replace_editor'])
 })
 
-test('zero profile seeds the fixed test notice and skips subagents by default', () => {
+test('zero profile seeds the fixed test notice and anchors subagents by default', () => {
   const { listeners } = register(ZERO)
   assert.deepEqual(anchorMessage(listeners['agent/inbox/inserted']).map((entry) => entry.message.content[0].text), [
     ANCHOR_TEXTS['test-notice'],
   ])
-  assert.deepEqual(anchorMessage(listeners['agent/inbox/inserted'], { depth: 1 }), [])
+  assert.deepEqual(anchorMessage(listeners['agent/inbox/inserted'], { depth: 1 }).map((entry) => entry.message.content[0].text), [
+    ANCHOR_TEXTS['test-notice'],
+  ])
 })
 
 test('whoami profile seeds 你是谁 and subagents inherit the anchor', () => {
@@ -145,7 +147,7 @@ test('whoami subagents follow the empty anchor phase before promotion', async ()
   const controlled = await assemble(listeners['system-prompt/assemble'], [], tools, { delegationDepth: 1 }, 'w-controlled')
   assert.deepEqual(names(controlled), [])
   const promoted = await assemble(listeners['system-prompt/assemble'], [{ type: 'assistant/message' }], tools, { delegationDepth: 1 }, 'w-promoted')
-  assert.ok(names(promoted).includes('bash'))
+  assert.deepEqual(names(promoted), ['dev_tool_search'])
 })
 
 test('subagents bootstrap profile follows the minimal controlled phase', async () => {
@@ -205,6 +207,19 @@ test('controlled persona falls back to the full persona when only one is configu
   const tools = [{ name: 'bash' }, { name: 'str_replace_editor' }]
   const result = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p3') }, async () => fullAssembly(tools))
   assert.deepEqual(result.sections, [{ name: 'deployment:persona', text: full }])
+})
+
+test('persona swap synthesizes the persona section when the preset registers none', async () => {
+  const full = 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.'
+  const { listeners } = register({ ...ANCHORED, personaText: full })
+  const tools = [{ name: 'bash' }, { name: 'str_replace_editor' }]
+  const result = await listeners['system-prompt/assemble'](undefined, { agent: agent([], {}, 'p4') }, async () => ({
+    sections: [{ name: 'harness:identity', text: 'harness identity' }],
+    contexts: [{ name: 'sandbox:policy', text: 'file policy' }],
+    tools,
+  }))
+  assert.deepEqual(result.sections, [{ name: 'deployment:persona', text: full }])
+  assert.deepEqual(result.contexts, [])
 })
 
 test('pre-step strips source kinds while controlled and plugin messages permanently', async () => {

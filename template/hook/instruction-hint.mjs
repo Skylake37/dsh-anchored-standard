@@ -1,30 +1,37 @@
 /**
  * instruction-hint — replace `dsh-agent-instructions`' full AGENTS.md/CLAUDE.md
- * injection with a minimal "these files exist" hint.
+ * injection with a minimal "these reference documents exist" note.
  *
  * WHY: the full workspace-instruction digest is a large injected block. After
- * the anchored bootstrap promotes, we want the model to KNOW the instruction
- * files exist (so it reads them before acting) without dumping their content
- * into every request. The model reads the files itself via the filesystem
- * tools when it needs them.
+ * the anchored bootstrap promotes, we want the model to KNOW the reference
+ * files exist without dumping their content into every request. The model
+ * reads the files itself via the filesystem tools when it needs them.
+ *
+ * Wording contract (measured, upstream issue #49): this injected user-role
+ * message must stay a NEUTRAL/SUGGESTIVE reference note. Imperative wording
+ * ("Do NOT assume… read first and follow them") coincided with the reasoning
+ * style flipping from collaborative "we" to first-person "let me" exactly on
+ * the promoted request. Keep it declarative: state existence, state purpose,
+ * recommend softly, never command.
  *
  * Behavior:
  *  - After the session records its first durable promotion signal
  *    (`promoteOn`, default `either`), ONE hint message is injected (once per
- *    session — durable event scan, resume-safe), listing which instruction
+ *    session — durable event scan, resume-safe), listing which reference
  *    files were found:
  *      - user-global: `$DSH_HOME/AGENTS.md`
  *      - project chain: AGENTS.md / CLAUDE.md / AGENTS.local.md / CLAUDE.local.md
  *        walking up from the session cwd to the project root (a directory
  *        containing `.git`, or the cwd itself).
- *  - The hint instructs the model to READ the files before acting when
- *    relevant, without embedding their content.
  *  - Files are probed via `ctx.fs` (the host filesystem seam); a missing fs
  *    service or an unreadable probe degrades to no hint (never throws).
  *  - Pre-promotion requests get NO hint (matches the anchored bootstrap).
+ *  - `includeSubagents: true` makes subagents follow the same promotion clock
+ *    as top-level sessions. Anchor modes that anchor subagents MUST set it,
+ *    otherwise a child receives the post-promotion hint on its anchor request.
  *
  * ROW ORDER: this plugin registers its `agent/pre-step` handler with
- * `prepend: true` and after `tool-bootstrap`, so it runs inside the
+ * `prepend: true` and after `anchor-bootstrap`, so it runs inside the
  * bootstrap's outermost strip — but it emits AFTER promotion, when the strip
  * is inactive. The hint source kind is `instruction-hint`, which is NOT in
  * `suppressedContextSources`, so it is never stripped.
@@ -101,10 +108,35 @@ function parentPath(path) {
   return parent.length === 0 ? path : parent
 }
 
+/** Neutral/suggestive post-promotion hint body. */
+function renderHint(projectPaths, userGlobalPath) {
+  const sections = []
+  if (projectPaths.length > 0) {
+    sections.push(`Reference documents exist in the project: ${projectPaths.join(', ')}.`)
+  }
+  if (userGlobalPath !== undefined) {
+    sections.push(`A user reference document exists: ${userGlobalPath} (topic index; topic files AGENTS-*.md and env-* skills).`)
+  }
+  if (sections.length > 0) {
+    sections.push(
+      'They are reference documents about the user environment (paths, network rules, tooling notes), not task instructions.',
+      'Reading them before workspace tasks is recommended — they are short — but consult them only when you need environment details; the task itself never depends on them.',
+    )
+  }
+  sections.push(
+    'The resident tool set is intentionally small; most other capabilities are unlockable through dev_tool_search.',
+    'The preceding anchor or identity response only established the phase; the next user message is the first normal task phase, so the same discovery pattern applies there.',
+    'Common unlockable families: read / write / edit / glob / grep / todo_write / ask_user_question, web_search, subagent / subagent_fork / workflow, and mcp__* servers.',
+    'That pattern remains useful even when bash or str_replace_editor can perform the task: the purpose-built unlocked tool is usually the more direct path.',
+  )
+  return sections.join(' ')
+}
+
 /** Register the post-promotion instruction-hint injector. */
 export function apply(ctx, config) {
   const promoteEvents = parsePromoteOn(config.promoteOn)
-  const promotion = createEpochPromotion(promoteEvents)
+  const includeSubagents = config?.includeSubagents === true
+  const promotion = createEpochPromotion(promoteEvents, { includeSubagents })
   ctx.on('session/event', (session, event) => promotion.observe(session, event))
 
   /** Sessions that already received the hint. */
@@ -136,33 +168,14 @@ export function apply(ctx, config) {
       const root = await findProjectRoot(fs, cwd, signal)
       projectFiles.push(...await presentInDir(fs, root, PROJECT_CANDIDATES, signal))
 
-      const userGlobalFiles = []
-      try {
-        const dshHome = process.env.DSH_HOME ?? (process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.dsh` : undefined)
-        if (dshHome !== undefined) {
-          userGlobalFiles.push(...await presentInDir(fs, dshHome, [USER_GLOBAL_CANDIDATE], signal))
-        }
-      } catch {
-        // Unreadable home probe — ignore.
+      const dshHome = process.env.DSH_HOME ?? (process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.dsh` : undefined)
+      let userGlobalPath
+      if (dshHome !== undefined) {
+        const userGlobalFiles = await presentInDir(fs, dshHome, [USER_GLOBAL_CANDIDATE], signal)
+        if (userGlobalFiles.length > 0) userGlobalPath = joinPath(dshHome, USER_GLOBAL_CANDIDATE)
       }
 
-      const sections = []
-      if (projectFiles.length > 0) {
-        sections.push(`Workspace instruction files exist: ${projectFiles.join(', ')} (project root: ${root}).`)
-      }
-      if (userGlobalFiles.length > 0) {
-        sections.push(`A user-global instruction file exists: ${USER_GLOBAL_CANDIDATE}.`)
-      }
-      const toolGuidance = [
-        'Tool guidance: before doing work with bash or str_replace_editor, check dev_tool_search for a purpose-built tool and prefer it whenever one exists.',
-        'If a tool you need is not in your current tool list, do not conclude it is unavailable: after your first tool call, call dev_tool_search with no query to list every unlockable tool, then unlock the exact names.',
-      ].join(' ')
-      if (sections.length > 0) {
-        sections.push('Do NOT assume their content. When a task touches this workspace, read the relevant instruction files first and follow them.')
-      }
-      sections.push(toolGuidance)
-
-      const text = [...sections].join(' ')
+      const text = renderHint(projectFiles.map((file) => joinPath(root, file)), userGlobalPath)
 
       return {
         ...decision,

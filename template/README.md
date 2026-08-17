@@ -5,19 +5,23 @@ preset 上“套壳”，生成新 preset 或原位 patch。所有下游自有�
 `template/` 和 `tools/` 两个目录。
 
 当前只有一个 gate hook：`anchor-bootstrap.mjs`，三种模式 profile：
-`anchored` / `zero` / `whoami`。**本地生成 preset 只用 `anchored`**；
-zero/whoami profile 保留在 hook 里，但实测带工具回合链会塌回 standard，
-已停用（见 [`research/mode-merge-analysis.md`](./research/mode-merge-analysis.md)）。
-hook 的完整模式表、配置键、每个文件的职责见
-[`hook/README.md`](./hook/README.md)。
+`anchored` / `zero` / `whoami`。zero/whoami 已重新启用：晋升后 persona 全程
+保持短句、`instruction-hint` 改为中性措辞、子代理默认同走 anchor turn，
+并剥掉源 persona 的 `complete: true` 以防 DSH 恢复源 persona（见
+[`research/mode-merge-analysis.md`](./research/mode-merge-analysis.md) 与
+[`hook/README.md`](./hook/README.md)）。
 
 ## 快速开始
 
 ```pwsh
 cd D:\Skills\dsh-anchored-standard
 
-# 生成 anchored 模式 preset（当前唯一交付模式）
+# 生成 anchored 模式 preset（默认交付）
 node tools/make-anchored-preset.mjs --from <source-dir-or-id> --to <new-id> --mode anchored
+
+# 生成 zero / whoami 模式 preset（子代理同样走 anchor turn）
+node tools/make-anchored-preset.mjs --from <source-dir-or-id> --to <new-id> --mode zero
+node tools/make-anchored-preset.mjs --from <source-dir-or-id> --to <new-id> --mode whoami
 
 # PTC（code）源：其工具面只有 run_code，锚定在 run_code 上
 node tools/make-anchored-preset.mjs --from <code-preset-dir> --to <new-id> --mode anchored --bootstrap-tools run_code
@@ -64,6 +68,8 @@ whoami）、晋升后 resident 目录、`compaction/end` 回落，以及 Windows
 
 - 源 preset 已挂 `anchor-bootstrap` / `tool-bootstrap` /
   `zero-tool-bootstrap` 时拒绝套壳。
+- 源 persona 行的 `complete: true` 会被剥掉，否则 DSH 在 assemble waterfall
+  之后恢复 complete section，persona 选择失效。
 - 晋升后不是完整目录；resident + `dev_tool_search` 按需解锁是实测结论。
 - **Windows 上不要用 PTY persistent bash**；生成器自动改用 `custom-bash`。
 - 含 `tool-cordis` 的源 preset 必须给 `--guard-cordis-tools`，否则 fail loud。

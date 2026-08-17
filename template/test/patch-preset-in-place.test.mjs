@@ -25,6 +25,49 @@ const COMPOSITION = `- id: persona
   name: '@deepseek-ai/dsh-tool-skill'
 `
 
+const COMPLETE_PERSONA_COMPOSITION = `- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: You are a helpful software engineer assistant.
+    complete: true
+    includeRuntimeContext: false
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+`
+
+test('patchPresetInPlace strips complete:true from a source persona row', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-patch-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const target = join(root, 'minimal-owner')
+  await mkdir(target, { recursive: true })
+  await writeFile(join(target, 'agent.cordis.yml'), COMPLETE_PERSONA_COMPOSITION)
+  await writeFile(join(target, 'preset.yml'), "name: Minimal Owner\norder: 1\n")
+
+  const result = await patchPresetInPlace({
+    target,
+    mode: 'whoami',
+    defaults: {
+      mode: 'anchored',
+      promoteOn: 'either',
+      subagents: 'resident',
+      suppressedContextSources: ['agent-instructions', 'skill-catalog'],
+      suppressedContextPlugins: [],
+      controlledPersonaText: 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.',
+      personaText: 'You are a helpful software engineer assistant. When working on a task, always open your reasoning with We need.',
+      compactionTools: ['read'],
+    },
+  })
+  assert.equal(result.plan.personaCompleteStripped, true)
+  const composition = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
+  assert.doesNotMatch(composition, /complete: true/)
+  const record = await readFile(join(target, 'HOOK-INSTALL.md'), 'utf8')
+  assert.match(record, /persona complete stripped: true/)
+})
+
 test('patchPresetInPlace patches a preset directory in place and writes a record', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-patch-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -57,9 +100,10 @@ test('patchPresetInPlace patches a preset directory in place and writes a record
   assert.match(composition, /mode: zero/)
   assert.match(composition, /firstTurnTools: empty/)
   assert.match(composition, /anchorText: test-notice/)
-  assert.match(composition, /subagents: resident/)
+  assert.match(composition, /subagents: anchor/)
   assert.match(composition, /promoteOn: assistant-message/)
   assert.doesNotMatch(composition, /- id: tool-bootstrap/)
+  assert.match(composition, /includeSubagents: true/)
 
   const meta = await readFile(join(target, 'preset.yml'), 'utf8')
   assert.match(meta, /Matlab Agentic Preset-梁圣版/)

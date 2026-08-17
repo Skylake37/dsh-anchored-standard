@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { apply, name } from '../hook/instruction-hint.mjs'
 
-function register() {
+function register(config = { promoteOn: 'assistant-message' }) {
   let listener
   const ctx = {
     on(event, callback) {
@@ -19,20 +19,20 @@ function register() {
     },
     logger: { warn() {} },
   }
-  apply(ctx, { promoteOn: 'assistant-message' })
+  apply(ctx, config)
   assert.equal(typeof listener, 'function')
   return listener
 }
 
-const agent = (events = []) => ({
-  session: { id: 's', events, header: { cwd: 'C:\\nonexistent' } },
+const agent = (events = [], depth = 0) => ({
+  session: { id: `s-${depth}`, events, header: { cwd: 'C:\\nonexistent', delegationDepth: depth } },
 })
 
 test('exports the diagnostic plugin name', () => {
   assert.equal(name, 'instruction-hint')
 })
 
-test('post-promotion pre-step injects the tool guidance even without instruction files', async () => {
+test('post-promotion pre-step injects neutral tool guidance even without instruction files', async () => {
   const listener = register()
   const decision = await listener(
     { agent: agent([{ type: 'assistant/message' }]) },
@@ -41,9 +41,13 @@ test('post-promotion pre-step injects the tool guidance even without instruction
   const hint = decision.messages.find((message) => message.id?.startsWith('instruction-hint-'))
   assert.ok(hint, 'expected a hint message')
   const text = hint.content[0].text
-  assert.match(text, /Tool guidance:/)
   assert.match(text, /dev_tool_search/)
-  assert.match(text, /purpose-built tool/)
+  assert.match(text, /The resident tool set is intentionally small/)
+  assert.match(text, /preceding anchor or identity response/)
+  assert.match(text, /Common unlockable families/)
+  assert.doesNotMatch(text, /Do NOT assume their content/)
+  assert.doesNotMatch(text, /read the relevant instruction files first and follow them/)
+  assert.doesNotMatch(text, /before doing work with bash or str_replace_editor, check dev_tool_search/)
 })
 
 test('pre-promotion pre-step injects nothing', async () => {
@@ -53,4 +57,28 @@ test('pre-promotion pre-step injects nothing', async () => {
     async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
   )
   assert.equal(decision.messages.length, 1)
+})
+
+test('subagents are promoted by default and receive the hint on their first request', async () => {
+  const listener = register()
+  const decision = await listener(
+    { agent: agent([], 1) },
+    async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
+  )
+  assert.ok(decision.messages.some((message) => message.id?.startsWith('instruction-hint-')))
+})
+
+test('includeSubagents: true makes subagents wait for their own promotion signal', async () => {
+  const listener = register({ promoteOn: 'assistant-message', includeSubagents: true })
+  const controlled = await listener(
+    { agent: agent([], 1) },
+    async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
+  )
+  assert.equal(controlled.messages.length, 1)
+
+  const promoted = await listener(
+    { agent: agent([{ type: 'assistant/message' }], 2) },
+    async () => ({ kind: 'enter', messages: [{ id: 'user', role: 'user', content: [] }] }),
+  )
+  assert.ok(promoted.messages.some((message) => message.id?.startsWith('instruction-hint-')))
 })

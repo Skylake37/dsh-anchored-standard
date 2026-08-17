@@ -21,6 +21,7 @@ import {
   readMetaField,
   renderCustomBashRow,
   stampMinimalToolRows,
+  stripPersonaComplete,
   swapToolCordisRow,
 } from '../../tools/make-anchored-preset.mjs'
 
@@ -54,6 +55,20 @@ const MINIMAL_COMPOSITION = `- id: pty
 
 - id: str-replace-editor
   name: '@deepseek-ai/dsh-tool-str-replace-editor'
+`
+
+const COMPLETE_PERSONA_COMPOSITION = `- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: You are a helpful software engineer assistant.
+    complete: true
+    includeRuntimeContext: false
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash-persistent'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
 `
 
 const MINIMAL_GROUP_COMPOSITION = `- id: persistent-shell
@@ -185,7 +200,7 @@ test('buildAnchorBootstrapRow renders the zero and whoami profile rows', () => {
   assert.match(zero, /mode: zero/)
   assert.match(zero, /firstTurnTools: empty/)
   assert.match(zero, /anchorText: test-notice/)
-  assert.match(zero, /subagents: resident/)
+  assert.match(zero, /subagents: anchor/)
   assert.match(zero, /promoteOn: assistant-message/)
   assert.doesNotMatch(zero, /bootstrapTools:/)
 
@@ -205,6 +220,14 @@ test('buildAnchorBootstrapRow applies the optional cap and rejects incompatible 
   assert.throws(() => buildAnchorBootstrapRow({ mode: 'nope' }), /mode/)
 })
 
+test('stripPersonaComplete removes complete:true from a source persona row', () => {
+  const stripped = stripPersonaComplete(COMPLETE_PERSONA_COMPOSITION)
+  assert.equal(stripped.stripped, true)
+  assert.doesNotMatch(stripped.composition, /complete: true/)
+  assert.match(stripped.composition, /includeRuntimeContext: false/)
+  assert.equal(stripPersonaComplete(MINIMAL_COMPOSITION).stripped, false)
+})
+
 test('buildCompanionRows renders the instruction hint and discovery tools', () => {
   const rows = buildCompanionRows({ promoteOn: 'tool-call' })
   assert.match(rows, /- id: instruction-hint/)
@@ -212,6 +235,8 @@ test('buildCompanionRows renders the instruction hint and discovery tools', () =
   assert.match(rows, /promoteOn: tool-call/)
   assert.match(rows, /- id: dev-tool-search/)
   assert.match(rows, /- id: skill-search/)
+  assert.doesNotMatch(rows, /includeSubagents/)
+  assert.match(buildCompanionRows({ promoteOn: 'assistant-message', includeSubagents: true }), /includeSubagents: true/)
 })
 
 test('insertBootstrapRow puts the hook row before every other entry and keeps leading comments', () => {
@@ -312,6 +337,23 @@ test('generateAnchoredPreset stamps the unified hook on a standard preset', asyn
   assert.match(meta, /标准模式 Anchored \(experimental\)/)
 })
 
+test('generateAnchoredPreset strips complete:true from source persona rows', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const sourceDir = await fixturePreset(root, 'complete-persona', COMPLETE_PERSONA_COMPOSITION)
+
+  const result = await generateAnchoredPreset({
+    from: sourceDir,
+    to: 'complete-persona-anchored',
+    root: join(root, 'out'),
+    defaults: TEMPLATE_DEFAULTS,
+  })
+  assert.equal(result.plan.personaCompleteStripped, true)
+  const composition = await readFile(join(root, 'out', 'complete-persona-anchored', 'agent.cordis.yml'), 'utf8')
+  assert.doesNotMatch(composition, /complete: true/)
+  assert.match(composition, /controlledPersonaText:/)
+})
+
 test('generateAnchoredPreset generates zero and whoami profiles with the single hook', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-anchor-template-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -327,13 +369,16 @@ test('generateAnchoredPreset generates zero and whoami profiles with the single 
   assert.equal(zero.plan.mode, 'zero')
   assert.equal(zero.plan.firstTurnTools, 'empty')
   assert.equal(zero.plan.anchorText, 'test-notice')
+  assert.equal(zero.plan.subagents, 'anchor')
   const zeroComposition = await readFile(join(root, 'out', 'standard-zero', 'agent.cordis.yml'), 'utf8')
   assert.match(zeroComposition, /- id: anchor-bootstrap/)
   assert.match(zeroComposition, /mode: zero/)
   assert.match(zeroComposition, /firstTurnTools: empty/)
   assert.match(zeroComposition, /anchorText: test-notice/)
+  assert.match(zeroComposition, /subagents: anchor/)
   assert.match(zeroComposition, /promoteOn: assistant-message/)
   assert.doesNotMatch(zeroComposition, /bootstrapTools:/)
+  assert.match(zeroComposition, /- id: instruction-hint[\s\S]*?includeSubagents: true/)
 
   const whoami = await generateAnchoredPreset({
     from: sourceDir,
@@ -471,7 +516,7 @@ test('generateAnchoredPreset requires the guard bundle for tool-cordis sources a
 
 test('MODE_PROFILES exports the three validated profiles', () => {
   assert.deepEqual(MODE_PROFILES.anchored, { firstTurnTools: 'minimal', anchorText: 'none', subagents: 'resident', promoteOn: 'either' })
-  assert.deepEqual(MODE_PROFILES.zero, { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'resident', promoteOn: 'assistant-message' })
+  assert.deepEqual(MODE_PROFILES.zero, { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'anchor', promoteOn: 'assistant-message' })
   assert.deepEqual(MODE_PROFILES.whoami, { firstTurnTools: 'empty', anchorText: 'whoami', subagents: 'anchor', promoteOn: 'assistant-message' })
 })
 

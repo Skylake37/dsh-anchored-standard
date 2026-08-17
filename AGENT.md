@@ -11,6 +11,16 @@ workflow that maintains it, so upstream merges never conflict with local feature
 | `main` | **Upstream mirror + sync infra.** Rebased onto `upstream/main` by the sync workflow, then force-pushed. The only local file allowed here is `.github/workflows/sync-upstream.yml`; never add anything else. |
 | `agent-dev` | **Working branch for all agent sessions.** Superset of `main`: upstream content + downstream template work (`template/`, `tools/`, `AGENT.md`, `CLAUDE.md`). Check it out and stay on it. |
 
+## Downstream hook contract
+
+`template/hook` is a patch layer over an existing source preset, not a replacement
+preset. A generated patch preserves the source persona, tools, MCP/Cordis rows,
+permissions, compaction, and domain configuration unless the patch explicitly
+claims that mechanism layer. The future interface composes lifecycle layers
+(session phase, turn opening, tool execution, and session seed); it must reject
+duplicate gates, incompatible `think` + `wire-think`, unsafe `sessionSeed` + live
+zero/whoami combinations, and uncontrolled full-catalog fallback.
+
 ## Branch usage
 
 - Do not work directly on `main`.
@@ -76,7 +86,9 @@ Installed preset records (outside this repo, referenced by path):
   `code-anchored`（PTC模式-梁圣版，bootstrapTools=run_code）、
   `minimal-anchored`（极简模式）、`cordis-anchored`（创造模式-梁圣版，
   tool-cordis 守卫；headless 无 cordis-host-runner，需 web profile 验证）。
-- zero/whoami 生成已停用（带工具回合链塌回 standard，实测结论）。
+- zero/whoami 已重新启用：生成器会把子代理也切到 anchor turn，
+  `instruction-hint` 只在中性措辞下注入，且会剥掉源 persona 的
+  `complete: true`（改完 defaults 必须重新生成安装态）。
 
 ## Done checks
 

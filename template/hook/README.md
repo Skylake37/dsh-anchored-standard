@@ -21,16 +21,46 @@ node tools/patch-preset-in-place.mjs --target <preset-dir> --mode zero --name '<
 
 装完后**完全重启 DSH**；standing mount 不会回收旧代际。
 
-## 模式总览
+## Patch 语义（后续 contract）
+
+这里的 hook 不是新的完整 preset，而是对已有 source preset 的受控 patch：
+source 的 persona、工具、MCP、Cordis、权限、compaction 和领域配置默认全部保留；
+hook 只增加或替换明确声明的机制层。`anchored`、`zero`、`whoami`、`think`、
+`wire-think`、`combo`、`eternal-minimal` 与 `prefab` 是不同层 hook 的合法组合，
+不是互相覆盖的完整 preset。
+
+未来 patch 输入的概念形态：
+
+```yaml
+patch:
+  from: standard
+  mode: zero
+  preserve: [persona, tools, mcp, permissions, compaction]
+  hooks:
+    contextGate: ...
+    toolBootstrap: ...
+    anchor: ...
+    instructionHint: ...
+    turnOpening: ...
+    toolExecution: ...
+    sessionSeed: ...
+```
+
+生成器负责编译 canonical row 顺序并做组合校验；用户不应手工排列 waterfall。
+重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许
+`sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥；
+`eternal-minimal` 不进入普通 promotion phase。当前 `anchor-bootstrap.mjs` 是
+兼容旧生成器的过渡合并实现，后续会按生命周期拆成多个可组合 patch rows。
 
 | mode | `firstTurnTools` | `anchorText` | `subagents` | 首模型请求 | 晋升信号 |
 |---|---|---|---|---|---|
 | `anchored` | `minimal` | `none` | `resident`（或 `bootstrap`） | `bash + str_replace_editor` | 首个持久 `tool/call` 或 `assistant/message`（`promoteOn` 可配） |
-| `zero` | `empty` | `test-notice` | `resident` | 0 工具 + 固定测试句 | anchor 回复（`assistant/message`） |
+| `zero` | `empty` | `test-notice` | `anchor`（或 `resident`） | 0 工具 + 固定测试句 | anchor 回复（`assistant/message`） |
 | `whoami` | `empty` | `whoami` | `anchor` | 0 工具 + `你是谁` | anchor 回复（`assistant/message`） |
 
 共同后半段：晋升后都是 **resident 目录** = 模式基集 + `dev_tool_search` /
-`skill_search` / `skill_load` + 模型显式解锁的工具；`compaction/end` 后按
+`skill_search` / `skill_load` + 模型显式解锁的工具；其中 `whoami` 的首次晋升请求刻意只保留
+三个发现工具，先让模型发现并解锁任务工具，再获得所解锁的工具。`compaction/end` 后按
 epoch 回落到模式基集 + `compactionTools`，等边界之后的新晋升信号。
 
 ## 每个 hook 的职责与配置
@@ -45,16 +75,18 @@ epoch 回落到模式基集 + `compactionTools`，等边界之后的新晋升信
 - anchor turn 注入：`anchorText != none` 时在用户第一条真实消息前 prepend
   合成 user 消息；
 - 晋升状态机：`compaction-epoch` 的事件驱动 `(boundary, promoted)`；
-- resident 目录：`minimal` 基集 = `bootstrapTools`；`empty` 基集 = shells +
-  `str_replace_editor`；再加三个发现工具与已解锁工具；
-- persona：**永久 Minimal 原句**（`You are a helpful software engineer assistant.`），
-  不写任何 reasoning 风格指令——轨迹由条件间接选择（干净 persona + 首请求工具面 +
-  无注入 context），而不是让模型照着说；工具解锁/专用工具指引由
-  `instruction-hint.mjs` 在晋升后以 user 消息注入，不进 system persona；
+- resident 目录：`minimal` 基集 = `bootstrapTools`；普通 `empty` 基集 = shells +
+  `str_replace_editor`；`whoami` 首次晋升基集仅为三个发现工具；所有模式再加模型显式解锁的工具；
+- persona：阶段感知替换 `deployment:persona`，受控期用
+  `controlledPersonaText`、晋升后用 `personaText`（当前 defaults 两者都带
+  We-need opener，工具指引不进 persona）。目标 preset 没有 persona section
+  时会自动合成一个；生成器还会剥掉源 persona 行的 `complete: true`，否则
+  DSH 在 waterfall 之后恢复该 complete section，会压过这里的选择；
 - context 过滤：受控期剥 `suppressedContextSources`；每请求剥
   `suppressedContextPlugins`；
 - 可选 cap：受控期注入 `bootstrapMaxTokens`，晋升后显式剥掉；
-- 子代理策略：`subagents: resident | bootstrap | anchor`。
+- 子代理策略：`subagents: resident | bootstrap | anchor`（zero/whoami 默认
+  `anchor`，子代理同走 anchor turn）。
 
 配置键：
 
@@ -69,7 +101,7 @@ bootstrapMaxTokens: <positive int | 省略>      # 全模式 opt-in
 suppressedContextSources: [agent-instructions, skill-catalog]
 suppressedContextPlugins: ['@deepseek-ai/dsh-system-prompt']
 controlledPersonaText: "base + We-need opener"
-personaText: "base + opener + unlock 指引 + 工具偏好"
+personaText: "base + We-need opener"   # 当前 defaults 同 controlled；工具指引在 instruction-hint
 compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
 ```
 
@@ -89,11 +121,17 @@ compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
 
 ### `instruction-hint.mjs`
 
-- 晋升后一次性注入 user 消息：instruction 文件存在提示（若有）+ **工具指引**
-  （动 bash / str_replace_editor 前先 `dev_tool_search` 找专用工具并优先使用；
-  找不到工具时先解锁）；
+- 晋升后一次性注入 user 消息：instruction 文件存在提示（若有）+ 工具指引。
+- **措辞契约（上游 issue #49 实测）**：必须是中性/建议式，不能是命令式；
+  “read first and follow them” 一类命令会在晋升后把思维链从 `we` 打回
+  `let me`。当前文本用 “Reference documents exist… Reading … is
+  recommended… consult only when needed”，工具指引同样是
+  “Purpose-built tools are often available…” 而不是 “before doing work… check”。
 - 配置 `promoteOn`：anchored 与 gate 的 `promoteOn` 一致；zero/whoami 为
   `assistant-message`。
+- 配置 `includeSubagents: true`：`subagents: anchor` / `bootstrap` 模式由生成器
+  自动写入，让子代理也等自己的晋升信号；否则子代理在锚定回合就会收到
+  晋升后 hint。
 
 ### `dev-tool-search.mjs`（本地增强版）
 
@@ -119,13 +157,16 @@ compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
   waterfall 最后一层）；伴生 `instruction-hint` / `dev-tool-search` /
   `skill-search` 跟随其后；
 - 源 preset 已挂 `anchor-bootstrap` / `tool-bootstrap` /
-  `zero-tool-bootstrap` 时 fail loud，拒绝二次套壳。
+  `zero-tool-bootstrap` 时 fail loud，拒绝二次套壳；
+- 源 persona 行若有 `complete: true`，生成器会剥掉（否则 DSH 的 complete
+  section 会在 waterfall 后恢复，覆盖 anchor-bootstrap 的 persona 替换）。
 
 ## 验证要点
 
 - `zero` / `whoami`：首个 `request/header` 工具面为空，消息面只有合成 anchor；
   anchor 回复后下一个 header 已 promoted，resident 基集 = shells +
-  `str_replace_editor` + 三个发现工具 + 已解锁工具。
+  `str_replace_editor` + 三个发现工具 + 已解锁工具；子代理同样先 anchor
+  （`delegationDepth > 0` 也如此），且 anchor 回合不应有 `instruction-hint`。
 - `anchored`：首个 header 只有 `bootstrapTools`。
 - 看完整链条，不只首条回复：全程应保持 `We need / We have / We …`，不回落
   `Let me` / `The user asks`。

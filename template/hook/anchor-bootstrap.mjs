@@ -7,7 +7,7 @@
  * selects a validated mode profile:
  *
  *   anchored = firstTurnTools minimal + no anchor turn + subagents resident
- *   zero     = firstTurnTools empty   + test-notice anchor + subagents resident
+ *   zero     = firstTurnTools empty   + test-notice anchor + subagents anchor
  *   whoami   = firstTurnTools empty   + whoami anchor + subagents anchor
  *
  * Behavior per session:
@@ -79,7 +79,7 @@ export const ANCHOR_TEXTS = {
 /** Named mode profiles; explicit atomic fields must agree with their mode. */
 export const MODE_PROFILES = {
   anchored: { firstTurnTools: 'minimal', anchorText: 'none', subagents: 'resident', promoteOn: 'either' },
-  zero: { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'resident', promoteOn: 'assistant-message' },
+  zero: { firstTurnTools: 'empty', anchorText: 'test-notice', subagents: 'anchor', promoteOn: 'assistant-message' },
   whoami: { firstTurnTools: 'empty', anchorText: 'whoami', subagents: 'anchor', promoteOn: 'assistant-message' },
 }
 
@@ -90,7 +90,7 @@ const SUBAGENT_MODES = new Set(['resident', 'bootstrap', 'anchor'])
 /** Whitelisted subagent policies per mode (the mode profile is the default). */
 const MODE_SUBAGENT_WHITELIST = {
   anchored: new Set(['resident', 'bootstrap']),
-  zero: new Set(['resident']),
+  zero: new Set(['resident', 'anchor']),
   whoami: new Set(['anchor']),
 }
 const PROMOTE_ON_VALUES = new Set(['either', 'tool-call', 'assistant-message'])
@@ -316,9 +316,13 @@ export function apply(ctx, config) {
     const sections = assembled.sections
     if (!Array.isArray(sections)) return assembled
     const index = sections.findIndex((section) => section.name === PERSONA_SECTION)
-    if (index === -1) return assembled
-    const persona = { ...sections[index], text }
-    const next = { ...assembled, sections: [persona] }
+    // Some custom presets never register a persona row. Inserting the section
+    // here keeps the phase-appropriate persona effective for them too; DSH
+    // only restores a REGISTERED `complete` section after this waterfall, so a
+    // missing section is safe to synthesize (the generator also strips
+    // `complete: true` from a source persona row for the registered case).
+    const persona = index === -1 ? { name: PERSONA_SECTION } : sections[index]
+    const next = { ...assembled, sections: [{ ...persona, text }] }
     if (Array.isArray(assembled.contexts) && assembled.contexts.length > 0) next.contexts = []
     return next
   }
@@ -329,12 +333,28 @@ export function apply(ctx, config) {
     return applyPersona(assembled, controlledPersonaText === undefined ? personaText : controlledPersonaText)
   }
 
+  /** Make resident fallbacks visibly secondary after promotion, without changing the anchor surface. */
+  const annotateResidentFallbacks = (tools) => tools.map((tool) => {
+    if (!['bash', 'pwsh', 'str_replace_editor'].includes(tool.name)) return tool
+    return {
+      ...tool,
+      description: `${tool.description}\n\nThis is a resident fallback; task-specific purpose-built tools are often unlockable through dev_tool_search and are usually the more direct path.`,
+    }
+  })
+
   /** Select the promoted resident set for the phase base. */
   const residentCatalog = (assembled, session) => {
+    if (profile.mode === 'whoami') {
+      const keep = new Set([...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(session)])
+      const resident = keepTools(assembled, keep, false)
+      return { ...resident, tools: annotateResidentFallbacks(resident.tools) }
+    }
+
     const available = new Set(assembled.tools.map((tool) => tool.name))
     if (profile.firstTurnTools === 'minimal') {
       const keep = new Set([...bootstrapTools, ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(session)])
-      return keepTools(assembled, keep, false)
+      const resident = keepTools(assembled, keep, false)
+      return { ...resident, tools: annotateResidentFallbacks(resident.tools) }
     }
     const selectedShells = SHELLS.filter((toolName) => available.has(toolName))
     if (selectedShells.length === 0) {
@@ -344,7 +364,7 @@ export function apply(ctx, config) {
     const keep = new Set([...selectedShells, 'str_replace_editor', ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(session)])
     return {
       ...assembled,
-      tools: assembled.tools.filter((tool) => keep.has(tool.name)),
+      tools: annotateResidentFallbacks(assembled.tools.filter((tool) => keep.has(tool.name))),
     }
   }
 

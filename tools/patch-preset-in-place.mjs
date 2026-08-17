@@ -15,7 +15,7 @@
  *   --target <dir>         Preset directory to patch in place. Required.
  *   --mode <mode>          anchored | zero | whoami. Default: zero.
  *   --name <text>          Display name for preset.yml. Default: keep the
- *                          existing name with " (zero)" appended.
+ *                          existing name with a mode suffix appended.
  *   --description <text>   Display description. Default: generated summary.
  *   --order <n>            Preset order. Default: 5.
  *   --win-bash-path <path> Windows custom-bash path.
@@ -44,6 +44,7 @@ import {
   readMetaField,
   resolveOptions,
   stampMinimalToolRows,
+  stripPersonaComplete,
 } from './make-anchored-preset.mjs'
 
 function parseArgs(argv) {
@@ -120,6 +121,8 @@ export async function patchPresetInPlace(options) {
       disabledSourceRows.push(sourceRow)
     }
   }
+  const persona = stripPersonaComplete(finalComposition)
+  finalComposition = persona.composition
 
   const row = buildAnchorBootstrapRow({
     mode: resolved.mode,
@@ -132,11 +135,20 @@ export async function patchPresetInPlace(options) {
     controlledPersonaText: resolved.controlledPersonaText,
     compactionTools: resolved.compactionTools,
   })
-  const companionRows = buildCompanionRows({ promoteOn: resolved.promoteOn })
+  const companionRows = buildCompanionRows({
+    promoteOn: resolved.promoteOn,
+    includeSubagents: resolved.subagents !== 'resident',
+  })
   finalComposition = insertBootstrapRow(finalComposition, `${row}\n\n${companionRows}`)
 
-  const displayName = options.name ?? `${sourceName} (zero)`
-  const description = options.description ?? `Zero-anchored in-place patch of ${sourceName}.`
+  const modeLabels = { anchored: 'anchored', zero: 'zero', whoami: 'whoami' }
+  const displayName = options.name ?? `${sourceName} (${modeLabels[resolved.mode]})`
+  const modeDescriptions = {
+    anchored: `Anchored in-place patch of ${sourceName}.`,
+    zero: `Zero-anchored in-place patch of ${sourceName}.`,
+    whoami: `Whoami-anchored in-place patch of ${sourceName}.`,
+  }
+  const description = options.description ?? modeDescriptions[resolved.mode]
   const patchedMeta = patchPresetMeta(meta, {
     name: displayName,
     description,
@@ -150,6 +162,7 @@ export async function patchPresetInPlace(options) {
     appendedToolGroups: stamped.appended,
     toolBashDisabled: stamped.toolBashDisabled,
     disabledSourceRows,
+    personaCompleteStripped: persona.stripped,
     filesToCopy: [HOOK_FILE_NAME, ...COMPANION_HOOK_FILES],
     meta: { name: displayName, description, order: resolved.order },
   }
@@ -172,6 +185,7 @@ export async function patchPresetInPlace(options) {
     `- hook: ${HOOK_FILE_NAME}`,
     `- files copied: ${copied.join(', ')}`,
     `- disabled source rows: ${disabledSourceRows.length > 0 ? disabledSourceRows.join(', ') : 'none'}`,
+    `- persona complete stripped: ${persona.stripped}`,
     `- appended tool groups: ${stamped.appended.length > 0 ? stamped.appended.join(', ') : 'none'}`,
     `- tool-bash disabled: ${stamped.toolBashDisabled}`,
     '',
@@ -200,6 +214,7 @@ if (isMain) {
       process.stdout.write(`bootstrap tools: ${plan.bootstrapTools.join(', ')}\n`)
       if (plan.appendedToolGroups.length > 0) process.stdout.write(`appended groups: ${plan.appendedToolGroups.join(', ')}\n`)
       if (plan.toolBashDisabled) process.stdout.write('disabled standard tool-bash (persistent bash owns the bash name)\n')
+      if (plan.personaCompleteStripped) process.stdout.write('stripped complete:true from the source persona row (anchor-bootstrap persona swap is authoritative)\n')
       if (plan.disabledSourceRows.length > 0) process.stdout.write(`disabled source rows: ${plan.disabledSourceRows.join(', ')}\n`)
       if (result.written) process.stdout.write(`record: ${result.recordPath}\n`)
     }
