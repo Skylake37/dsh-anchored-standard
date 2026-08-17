@@ -39,8 +39,6 @@ jobs:
           git switch main
           git pull --ff-only origin main
           git rebase upstream/main
-          git fetch origin main
-          git rebase origin/main
           git push --force-with-lease origin main
 
       - name: Merge main into agent-dev
