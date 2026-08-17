@@ -103,6 +103,9 @@ export function apply(ctx, config) {
   const defaultProvider = typeof config?.defaultProvider === 'string' && config.defaultProvider.length > 0
     ? config.defaultProvider
     : DEFAULT_OFFICIAL_PROVIDER
+  if (thinkProvider === defaultProvider) {
+    throw new TypeError(`${name}: provider and defaultProvider must differ`)
+  }
   const suppressedSources = sourceList(config?.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
   const includeSubagents = config?.includeSubagents === true
   const steerText = typeof config?.steerText === 'string' && config.steerText.length > 0 ? config.steerText : STEER_TEXT

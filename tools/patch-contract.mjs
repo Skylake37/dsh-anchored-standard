@@ -3,8 +3,9 @@
  *
  * This module is deliberately pure: it validates a layer composition and
  * compiles the supported session-phase patch into the legacy anchor-bootstrap
- * options. It does not write preset files and does not silently ignore future
- * layers; unsupported mechanisms fail loudly.
+ * options. The layered backend additionally supports the independent
+ * think-phase/wire-think turnOpening layer. It does not write preset files and
+ * does not silently ignore future layers; unsupported mechanisms fail loudly.
  */
 
 export const PATCH_API_VERSION = 'dsh-anchored/v2'
@@ -27,6 +28,7 @@ export const SUPPORTED_PATCH_LAYERS = Object.freeze([
   'toolBootstrap',
   'anchor',
   'instructionHint',
+  'turnOpening',
 ])
 
 export const CANONICAL_ROW_ORDER = Object.freeze([
@@ -40,7 +42,11 @@ export const CANONICAL_ROW_ORDER = Object.freeze([
   'instruction-hint',
   'dev-tool-search',
   'skill-search',
-  'turn-opening',
+  'toolchoice-adapter',
+  'think-phase',
+  'wire-think',
+  'deliberation-gate',
+  'cot-drip',
   'tool-execution',
   'compaction',
   'gateway',
@@ -216,7 +222,7 @@ export function normalizePatchProfile(input) {
     gateway: enabled(gateway, 'patch.hooks.gateway'),
   }
   if (unsupported.sessionSeed && anchorKind !== 'none') throw new TypeError('sessionSeed cannot combine with a live zero/whoami anchor')
-  if (turnEnabled) throw new TypeError('think-phase and wire-think are not part of the layered patch backend')
+  if (turnEnabled && backend !== 'layered') throw new TypeError('think-phase and wire-think are not part of the legacy patch backend')
   if (deliberationEnabled) throw new TypeError('deliberation-gate is not part of the layered patch backend')
   if (cotEnabled) throw new TypeError('cot-drip is not part of the layered patch backend')
   if (unsupported.sessionSeed) throw new TypeError('prefab is not part of the layered patch backend')
@@ -306,7 +312,11 @@ export function duplicatePatchRows(composition, profile) {
   if (normalized.hooks.toolBootstrap.firstTurnTools !== undefined) claims.add('tool-bootstrap')
   if (normalized.hooks.anchor.kind !== 'none') claims.add('anchor-turn')
   if (normalized.hooks.turnOpening.enabled) {
-    claims.add(normalized.hooks.turnOpening.kind)
+    // think-phase and wire-think are the same turnOpening union: a profile may
+    // select only one, so any pre-existing think OR wire row in the source is a
+    // competing hook and must fail loud rather than silently duplicate.
+    claims.add('think-phase')
+    claims.add('wire-think')
     if (normalized.hooks.turnOpening.kind === 'wire-think') claims.add('toolchoice-adapter')
   }
   if (normalized.hooks.toolExecution.deliberationGate.enabled) claims.add('deliberation-gate')

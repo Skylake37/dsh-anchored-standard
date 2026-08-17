@@ -61,13 +61,18 @@ node tools/patch-from-spec.mjs `
 `anchor-bootstrap`；设置 `backend: layered` 时，当前已真正生成独立的
 `context-gate`、`tool-bootstrap`/`zero-tool-bootstrap`、`anchor-turn`、
 `instruction-hint`、`dev-tool-search`、`skill-search` rows，并复制对应的
-shared hook 文件。`turnOpening`、`toolExecution`、`sessionSeed`、`gateway`
+shared hook 文件。`turnOpening` 现在也是 layered 后端支持的一层：`kind:
+think` 渲染/复制 `think-phase.mjs`，`kind: wire-think` 渲染/复制
+`toolchoice-adapter.mjs`（必须排在 `wire-think.mjs` 之前）和
+`wire-think.mjs`，并要求 `wire-think` 的 `provider` 与
+`defaultProvider` 不同。`toolExecution`、`sessionSeed`、`gateway`
 仍会明确 fail-loud，暂不假装支持。旧的 `make-anchored-preset.mjs` 与
 `patch-preset-in-place.mjs` 默认行为保持不变。
 重复 gate/persona/anchor/instruction 或同名工具必须 fail-loud。默认不允许
-`sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥；
-`eternal-minimal` 不进入普通 promotion phase。当前 `anchor-bootstrap.mjs` 是
-兼容旧生成器的过渡合并实现，后续会按生命周期拆成多个可组合 patch rows。
+`sessionSeed` 与 live zero/whoami anchor 混用；`think` 与 `wire-think` 互斥，
+二者属于同一个 `turnOpening` union；`eternal-minimal` 不进入普通 promotion
+phase。当前 `anchor-bootstrap.mjs` 是兼容旧生成器的过渡合并实现，后续会按
+生命周期拆成多个可组合 patch rows。
 
 | mode | `firstTurnTools` | `anchorText` | `subagents` | 首模型请求 | 晋升信号 |
 |---|---|---|---|---|---|

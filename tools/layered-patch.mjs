@@ -12,7 +12,7 @@ import {
   insertBootstrapRow,
   stampMinimalToolRows,
 } from './make-anchored-preset.mjs'
-import { duplicatePatchRows, CANONICAL_ROW_ORDER } from './patch-contract.mjs'
+import { duplicatePatchRows } from './patch-contract.mjs'
 import { sha256, targetPreconditionHash, buildLedger, assertCanonicalRowOrder, rowIds, canonicalizeComposition } from './preservation-ledger.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -33,6 +33,23 @@ const SOURCE_FILES = Object.freeze({
   'deliberation-gate.mjs': 'shared/deliberation-gate.mjs',
   'cot-drip.mjs': 'shared/cot-drip.mjs',
 })
+
+/** Generated rows that the layered compiler owns, in canonical waterfall order. */
+const LAYERED_ROW_ORDER = Object.freeze([
+  'context-gate',
+  'tool-bootstrap',
+  'zero-tool-bootstrap',
+  'anchor-turn',
+  'anchor-bootstrap',
+  'instruction-hint',
+  'dev-tool-search',
+  'skill-search',
+  'toolchoice-adapter',
+  'think-phase',
+  'wire-think',
+  'deliberation-gate',
+  'cot-drip',
+])
 
 function yamlList(items) {
   return `[${items.map((item) => JSON.stringify(item)).join(', ')}]`
@@ -205,7 +222,7 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
   const replacedSourceRows = stamped.toolBashDisabled ? ['tool-bash'] : []
   const rows = buildLayeredRows(profile, bootstrapTools)
   finalComposition = canonicalizeComposition(insertBootstrapRow(finalComposition, rows))
-  assertCanonicalRowOrder(finalComposition, ['context-gate', 'tool-bootstrap', 'zero-tool-bootstrap', 'anchor-turn', 'anchor-bootstrap', 'instruction-hint', 'dev-tool-search', 'skill-search'])
+  assertCanonicalRowOrder(finalComposition, LAYERED_ROW_ORDER)
   const finalRows = rowIds(finalComposition)
   const plan = { target, backend: 'layered', mode: profile.mode, bootstrapTools, disabledSourceRows, replacedSourceRows, appendedToolGroups: stamped.appended, filesToCopy: files, sourcePreconditionHash: sourceHash, targetPreconditionHash: targetHash }
   const patchHash = sha256(JSON.stringify(profile) + '\n' + rows)

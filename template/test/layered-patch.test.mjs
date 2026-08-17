@@ -32,9 +32,29 @@ test('buildLayeredRows renders independent context, zero-tool, anchor, and compa
   assert.doesNotMatch(rows, /anchor-bootstrap/)
   assert.ok(rows.indexOf('- id: context-gate') < rows.indexOf('- id: zero-tool-bootstrap'))
 })
+test('buildLayeredRows keeps think and wire-think mutually exclusive with toolchoice-adapter before wire-think', () => {
+  const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
+  const think = normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'think' } } })
+  const thinkRows = buildLayeredRows(think, ['bash', 'str_replace_editor'])
+  assert.match(thinkRows, /- id: think-phase/)
+  assert.doesNotMatch(thinkRows, /- id: wire-think/)
+  assert.doesNotMatch(thinkRows, /- id: toolchoice-adapter/)
 
-test('unsupported future layered mechanisms are rejected', () => {
-  assert.throws(() => normalizePatchProfile({ apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /think-phase/)
+  const wire = normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
+  const wireRows = buildLayeredRows(wire, ['bash', 'str_replace_editor'])
+  assert.match(wireRows, /- id: toolchoice-adapter/)
+  assert.match(wireRows, /- id: wire-think/)
+  assert.doesNotMatch(wireRows, /- id: think-phase/)
+  assert.ok(wireRows.indexOf('- id: toolchoice-adapter') < wireRows.indexOf('- id: wire-think'))
+})
+
+test('layered turnOpening accepts think and wire-think while other future mechanisms are rejected', () => {
+  const base = { apiVersion: 'dsh-anchored/v2', backend: 'layered', from: 'standard', mode: 'anchored' }
+  assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { sessionSeed: { enabled: true } } }), /prefab/)
+  assert.throws(() => normalizePatchProfile({ ...base, hooks: { gateway: { enabled: true } } }), /gateway/)
 })
 
 test('applyLayeredPatch dry-run preserves source text except declared injection rows', async (t) => {

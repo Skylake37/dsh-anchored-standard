@@ -193,6 +193,10 @@ test('a request outside a session keeps the resolved config untouched', async ()
   assert.equal(kept, config)
 })
 
+test('wire-think requires a distinct sibling provider/defaultProvider', () => {
+  assert.throws(() => register({ provider: 'deepseek-wire-think', defaultProvider: 'deepseek-wire-think' }), /must differ/)
+})
+
 test('invalid config values fail at apply time', () => {
   assert.throws(() => register({ mode: 'sometimes' }), /mode/)
   assert.throws(() => register({ suppressedContextSources: [1] }), /suppressedContextSources/)

@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { normalizePatchProfile } from '../tools/patch-contract.mjs'
+import { duplicatePatchRows, normalizePatchProfile } from '../tools/patch-contract.mjs'
 import { applyLayeredPatch } from '../tools/layered-patch.mjs'
 import { buildLedger, sha256 } from '../tools/preservation-ledger.mjs'
 
@@ -28,12 +28,56 @@ test('layered dry-run and apply share hashes and preserve undeclared rows', asyn
   } finally { await rm(target, { recursive: true, force: true }) }
 })
 
-test('forbidden future mechanisms fail before writing', () => {
-  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /think-phase/)
+test('layered turnOpening is accepted while other future mechanisms still fail', () => {
+  assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } }))
+  assert.doesNotThrow(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } }))
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'legacy', hooks: { turnOpening: { enabled: true, kind: 'think' } } }), /think-phase/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'same', defaultProvider: 'same' } } }), /must differ/)
+  assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'through' } } }), /kind is invalid/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { sessionSeed: { enabled: true } } }), /prefab/)
   assert.throws(() => normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { gateway: { enabled: true } } }), /gateway/)
 })
 
+test('think-phase and wire-think are competing turn-opening rows in existing sources', () => {
+  const source = '- id: think-phase\n  name: ./think-phase.mjs\n- id: toolchoice-adapter\n  name: ./toolchoice-adapter.mjs\n- id: wire-think\n  name: ./wire-think.mjs\n'
+  const think = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'think' } } })
+  const wire = normalizePatchProfile({ from: 'x', backend: 'layered', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
+  assert.deepEqual(duplicatePatchRows(source, think).sort(), ['think-phase', 'wire-think'])
+  assert.deepEqual(duplicatePatchRows(source, wire).sort(), ['think-phase', 'toolchoice-adapter', 'wire-think'])
+})
+
+
+test('layered think and wire patches render/copy independent rows and files', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'layered-turn-'))
+  try {
+    await writeFile(join(target, 'agent.cordis.yml'), fixture)
+    const think = normalizePatchProfile({ from: 'fixture', backend: 'layered', mode: 'anchored', hooks: { turnOpening: { enabled: true, kind: 'think' } } })
+    const thinkDry = await applyLayeredPatch({ target, profile: think, dryRun: true })
+    assert.ok(thinkDry.plan.filesToCopy.includes('think-phase.mjs'))
+    assert.ok(!thinkDry.plan.filesToCopy.includes('wire-think.mjs'))
+    assert.deepEqual([...thinkDry.composition.matchAll(/- id: (think-phase|wire-think|toolchoice-adapter)/g)].map((match) => match[1]), ['think-phase'])
+
+    const wire = normalizePatchProfile({ from: 'fixture', backend: 'layered', mode: 'anchored', hooks: { turnOpening: { enabled: true, kind: 'wire-think', provider: 'deepseek-wire-think', defaultProvider: 'deepseek-official' } } })
+    const wireDry = await applyLayeredPatch({ target, profile: wire, dryRun: true })
+    assert.ok(wireDry.plan.filesToCopy.includes('toolchoice-adapter.mjs'))
+    assert.ok(wireDry.plan.filesToCopy.includes('wire-think.mjs'))
+    assert.ok(!wireDry.plan.filesToCopy.includes('think-phase.mjs'))
+    const ids = [...wireDry.composition.matchAll(/- id: (toolchoice-adapter|wire-think|think-phase)/g)].map((match) => match[1])
+    assert.deepEqual(ids, ['toolchoice-adapter', 'wire-think'])
+    assert.match(wireDry.composition, /provider: "deepseek-wire-think"/)
+    assert.match(wireDry.composition, /defaultProvider: "deepseek-official"/)
+
+    const wireWritten = await applyLayeredPatch({ target, profile: wire })
+    assert.equal(wireWritten.written, true)
+    const writtenText = await readFile(join(target, 'agent.cordis.yml'), 'utf8')
+    assert.match(writtenText, /- id: toolchoice-adapter/)
+    assert.match(writtenText, /- id: wire-think/)
+    assert.doesNotMatch(writtenText, /- id: think-phase/)
+    for (const file of ['toolchoice-adapter.mjs', 'wire-think.mjs', 'think-phase.mjs']) {
+      assert.equal(await stat(join(target, file)).then(() => true).catch(() => false), file !== 'think-phase.mjs')
+    }
+  } finally { await rm(target, { recursive: true, force: true }) }
+})
 
 test('ledger records disabled and replaced rows with per-row source/final hashes', () => {
   const sourceComposition = '- id: agent-instructions\n  name: ./agent-instructions.mjs\n- id: tool-bash\n  name: ./tool-bash.mjs\n'
