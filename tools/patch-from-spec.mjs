@@ -81,7 +81,8 @@ if (isMain) {
     process.stdout.write(`source: ${profile.from}\n`)
     process.stdout.write(`backend: ${profile.backend}\n`)
     process.stdout.write(`mode: ${compiled.mode}\n`)
-    process.stdout.write(`layers: sessionPhase, contextGate, toolBootstrap, anchor, instructionHint\n`)
+    const activeLayers = Object.keys(profile.hooks).filter((key) => key !== 'unsupported' && (profile.hooks[key]?.enabled !== false))
+    process.stdout.write(`layers: ${activeLayers.join(', ')}\n`)
     if (result.recordPath !== undefined) process.stdout.write(`record: ${result.recordPath}\n`)
   } catch (error) {
     process.stderr.write(`error: ${String(error?.message ?? error)}\n`)

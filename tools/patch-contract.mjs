@@ -176,12 +176,42 @@ export function normalizePatchProfile(input) {
     throw new Error(`${mode} promotedFallbackTools are not supported by the current compiler`)
   }
   const turnOpening = object(hooks.turnOpening, 'patch.hooks.turnOpening')
+  rejectUnknown(turnOpening, new Set(['enabled', 'kind', 'mode', 'steerText', 'provider', 'defaultProvider', 'includeSubagents', 'suppressedContextSources']), 'patch.hooks.turnOpening')
+  const turnKind = turnOpening.kind ?? 'none'
+  if (!new Set(['none', 'think', 'wire-think']).has(turnKind)) throw new TypeError('patch.hooks.turnOpening.kind is invalid')
+  if (turnOpening.enabled === true && turnKind === 'none') throw new TypeError('turnOpening.enabled requires kind think or wire-think')
+  const turnEnabled = turnKind !== 'none' && boolean(turnOpening.enabled, 'patch.hooks.turnOpening.enabled', true)
+  const turnMode = turnOpening.mode ?? 'every-turn'
+  if (!new Set(['every-turn', 'first-turn']).has(turnMode)) throw new TypeError('patch.hooks.turnOpening.mode is invalid')
+  const turnIncludeSubagents = boolean(turnOpening.includeSubagents, 'patch.hooks.turnOpening.includeSubagents', sessionPhase.includeSubagents === true)
+  const turnSuppressedSources = stringList(turnOpening.suppressedContextSources, 'patch.hooks.turnOpening.suppressedContextSources', ['skill-catalog', 'agent-instructions'])
+  const turnProvider = turnOpening.provider ?? 'deepseek-wire-think'
+  const turnDefaultProvider = turnOpening.defaultProvider ?? 'deepseek-official'
+  if (turnKind === 'wire-think' && turnProvider === turnDefaultProvider) throw new TypeError('wire-think provider and defaultProvider must differ')
+  const turnSteerText = turnOpening.steerText
+
   const toolExecution = object(hooks.toolExecution, 'patch.hooks.toolExecution')
+  rejectUnknown(toolExecution, new Set(['enabled', 'deliberationGate', 'cotDrip']), 'patch.hooks.toolExecution')
+  const deliberationGate = object(toolExecution.deliberationGate, 'patch.hooks.toolExecution.deliberationGate')
+  rejectUnknown(deliberationGate, new Set(['enabled', 'minChars', 'maxGatesPerTurn', 'includeSubagents', 'gateText']), 'patch.hooks.toolExecution.deliberationGate')
+  const deliberationEnabled = boolean(deliberationGate.enabled, 'patch.hooks.toolExecution.deliberationGate.enabled', false)
+  const deliberationMinChars = deliberationGate.minChars ?? 400
+  if (!Number.isSafeInteger(deliberationMinChars) || deliberationMinChars < 0) throw new TypeError('deliberationGate.minChars must be a non-negative integer')
+  const deliberationMaxGates = positiveInteger(deliberationGate.maxGatesPerTurn ?? 1, 'deliberationGate.maxGatesPerTurn')
+  const deliberationSubagents = boolean(deliberationGate.includeSubagents, 'patch.hooks.toolExecution.deliberationGate.includeSubagents', sessionPhase.includeSubagents === true)
+  const deliberationText = deliberationGate.gateText
+  const cotDrip = object(toolExecution.cotDrip, 'patch.hooks.toolExecution.cotDrip')
+  rejectUnknown(cotDrip, new Set(['enabled', 'every', 'maxPerTurn', 'includeSubagents', 'text']), 'patch.hooks.toolExecution.cotDrip')
+  const cotEnabled = boolean(cotDrip.enabled, 'patch.hooks.toolExecution.cotDrip.enabled', false)
+  const cotEvery = cotDrip.every ?? 4
+  if (!Number.isSafeInteger(cotEvery) || cotEvery < 0) throw new TypeError('cotDrip.every must be a non-negative integer')
+  const cotMaxPerTurn = positiveInteger(cotDrip.maxPerTurn ?? 1, 'cotDrip.maxPerTurn')
+  const cotSubagents = boolean(cotDrip.includeSubagents, 'patch.hooks.toolExecution.cotDrip.includeSubagents', sessionPhase.includeSubagents === true)
+  const cotText = cotDrip.text
+
   const sessionSeed = object(hooks.sessionSeed, 'patch.hooks.sessionSeed')
   const gateway = object(hooks.gateway, 'patch.hooks.gateway')
   const unsupported = {
-    turnOpening: enabled(turnOpening, 'patch.hooks.turnOpening'),
-    toolExecution: enabled(toolExecution, 'patch.hooks.toolExecution'),
     sessionSeed: enabled(sessionSeed, 'patch.hooks.sessionSeed'),
     gateway: enabled(gateway, 'patch.hooks.gateway'),
   }
@@ -213,6 +243,11 @@ export function normalizePatchProfile(input) {
       toolBootstrap: Object.freeze({ firstTurnTools, bootstrapTools: Object.freeze(bootstrapTools), promotedTools: Object.freeze(promotedTools), promotedFallbackTools: Object.freeze(promotedFallbackTools), unlockPolicy, compactionTools: Object.freeze(compactionTools), bootstrapMaxTokens }),
       anchor: Object.freeze({ kind: anchorKind, text: anchor.text, scope: anchorScope, includeSubagents: anchor.includeSubagents === true }),
       instructionHint: Object.freeze({ enabled: instructionHintEnabled, oncePerSession: instructionHintOnce, includeSubagents: instructionHintSubagents, mode: hintMode }),
+      turnOpening: Object.freeze({ enabled: turnEnabled, kind: turnKind, mode: turnMode, steerText: turnSteerText, provider: turnProvider, defaultProvider: turnDefaultProvider, includeSubagents: turnIncludeSubagents, suppressedContextSources: Object.freeze(turnSuppressedSources) }),
+      toolExecution: Object.freeze({
+        deliberationGate: Object.freeze({ enabled: deliberationEnabled, minChars: deliberationMinChars, maxGatesPerTurn: deliberationMaxGates, includeSubagents: deliberationSubagents, gateText: deliberationText }),
+        cotDrip: Object.freeze({ enabled: cotEnabled, every: cotEvery, maxPerTurn: cotMaxPerTurn, includeSubagents: cotSubagents, text: cotText }),
+      }),
       unsupported: Object.freeze(unsupported),
     }),
   })
@@ -223,8 +258,11 @@ export function compileSupportedPatch(profile) {
   const normalized = profile?.hooks?.unsupported !== undefined
     ? profile
     : normalizePatchProfile(profile)
-  const unsupported = Object.entries(normalized.hooks.unsupported).filter(([, active]) => active).map(([layer]) => layer)
-  if (unsupported.length > 0) throw new Error(`patch layers are not implemented yet: ${unsupported.join(', ')}`)
+  const activeFuture = [
+    ...(normalized.hooks.turnOpening.enabled ? ['turnOpening'] : []),
+    ...(normalized.hooks.toolExecution.deliberationGate.enabled || normalized.hooks.toolExecution.cotDrip.enabled ? ['toolExecution'] : []),
+  ]
+  if (normalized.backend === 'legacy' && activeFuture.length > 0) throw new Error(`patch layers are not implemented yet: ${activeFuture.join(', ')}`)
   const { sessionPhase, contextGate, toolBootstrap, instructionHint } = normalized.hooks
   return Object.freeze({
     backend: normalized.backend,
@@ -262,6 +300,11 @@ export function duplicatePatchRows(composition, profile) {
   if (normalized.hooks.contextGate.enabled) claims.add('context-gate')
   if (normalized.hooks.toolBootstrap.firstTurnTools !== undefined) claims.add('tool-bootstrap')
   if (normalized.hooks.anchor.kind !== 'none') claims.add('anchor-turn')
-  if (normalized.hooks.instructionHint.enabled) claims.add('instruction-hint')
+  if (normalized.hooks.turnOpening.enabled) {
+    claims.add(normalized.hooks.turnOpening.kind)
+    if (normalized.hooks.turnOpening.kind === 'wire-think') claims.add('toolchoice-adapter')
+  }
+  if (normalized.hooks.toolExecution.deliberationGate.enabled) claims.add('deliberation-gate')
+  if (normalized.hooks.toolExecution.cotDrip.enabled) claims.add('cot-drip')
   return [...claims].filter((id) => new RegExp(`^\\s*-\\s*id:\\s*${id}\\s*$`, 'm').test(composition))
 }

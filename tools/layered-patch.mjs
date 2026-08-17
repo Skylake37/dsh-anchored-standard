@@ -26,6 +26,11 @@ const SOURCE_FILES = Object.freeze({
   'tool-bootstrap.mjs': 'shared/tool-bootstrap.mjs',
   'zero-tool-bootstrap.mjs': 'shared/zero-tool-bootstrap.mjs',
   'anchor-turn.mjs': 'shared/anchor-turn.mjs',
+  'think-phase.mjs': 'shared/think-phase.mjs',
+  'wire-think.mjs': 'shared/wire-think.mjs',
+  'toolchoice-adapter.mjs': 'shared/toolchoice-adapter.mjs',
+  'deliberation-gate.mjs': 'shared/deliberation-gate.mjs',
+  'cot-drip.mjs': 'shared/cot-drip.mjs',
 })
 
 function yamlList(items) {
@@ -47,6 +52,7 @@ function anchorText(profile) {
 export function buildLayeredRows(profile, bootstrapTools) {
   const { sessionPhase, contextGate, toolBootstrap, anchor, instructionHint } = profile.hooks
   const rows = []
+  const turnOpening = profile.hooks.turnOpening
   rows.push([
     '# ── context-gate (layered patch; must remain FIRST) ──',
     '- id: context-gate',
@@ -99,13 +105,71 @@ export function buildLayeredRows(profile, bootstrapTools) {
     '- id: skill-search',
     '  name: ./skill-search.mjs',
   ].join('\n'))
+
+  if (turnOpening.enabled) {
+    if (turnOpening.kind === 'wire-think') {
+      rows.push([
+        '# toolchoice-adapter must precede wire-think in the local composition',
+        '- id: toolchoice-adapter',
+        '  name: ./toolchoice-adapter.mjs',
+      ].join('\n'))
+    }
+    const rowId = turnOpening.kind === 'think' ? 'think-phase' : 'wire-think'
+    rows.push([
+      `- id: ${rowId}`,
+      `  name: ./${turnOpening.kind === 'think' ? 'think-phase' : turnOpening.kind}.mjs`,
+      '  config:',
+      `    mode: ${turnOpening.mode}`,
+      `    includeSubagents: ${turnOpening.includeSubagents}`,
+      `    suppressedContextSources: ${yamlList(turnOpening.suppressedContextSources)}`,
+      ...(turnOpening.steerText === undefined ? [] : [`    steerText: ${yamlString(turnOpening.steerText)}`]),
+      ...(turnOpening.kind === 'wire-think' ? [`    provider: ${yamlString(turnOpening.provider)}`, `    defaultProvider: ${yamlString(turnOpening.defaultProvider)}`] : []),
+    ].join('\n'))
+  }
+
+  const execution = profile.hooks.toolExecution
+  if (execution.deliberationGate.enabled) {
+    const gate = execution.deliberationGate
+    rows.push([
+      '- id: deliberation-gate',
+      '  name: ./deliberation-gate.mjs',
+      '  config:',
+      `    minChars: ${gate.minChars}`,
+      `    maxGatesPerTurn: ${gate.maxGatesPerTurn}`,
+      `    includeSubagents: ${gate.includeSubagents}`,
+      ...(gate.gateText === undefined ? [] : [`    gateText: ${yamlString(gate.gateText)}`]),
+    ].join('\n'))
+  }
+  if (execution.cotDrip.enabled) {
+    const drip = execution.cotDrip
+    rows.push([
+      '- id: cot-drip',
+      '  name: ./cot-drip.mjs',
+      '  config:',
+      `    every: ${drip.every}`,
+      `    maxPerTurn: ${drip.maxPerTurn}`,
+      `    includeSubagents: ${drip.includeSubagents}`,
+      ...(drip.text === undefined ? [] : [`    text: ${yamlString(drip.text)}`]),
+    ].join('\n'))
+  }
   return rows.join('\n\n')
 }
 
-async function copyLayerFiles(target, profile) {
+function layerFileNames(profile) {
   const names = ['context-gate.mjs', 'compaction-epoch.mjs', 'instruction-hint.mjs', 'dev-tool-search.mjs', 'skill-search.mjs']
   names.push(profile.mode === 'anchored' ? 'tool-bootstrap.mjs' : 'zero-tool-bootstrap.mjs')
   if (profile.mode !== 'anchored') names.push('anchor-turn.mjs')
+  if (profile.hooks.turnOpening.enabled) {
+    if (profile.hooks.turnOpening.kind === 'wire-think') names.push('toolchoice-adapter.mjs', 'wire-think.mjs')
+    else names.push('think-phase.mjs')
+  }
+  if (profile.hooks.toolExecution.deliberationGate.enabled) names.push('deliberation-gate.mjs')
+  if (profile.hooks.toolExecution.cotDrip.enabled) names.push('cot-drip.mjs')
+  return [...new Set(names)]
+}
+
+async function copyLayerFiles(target, profile) {
+  const names = layerFileNames(profile)
   for (const name of names) {
     await copyFile(join(ROOT, SOURCE_FILES[name]), join(target, name))
   }
@@ -146,7 +210,7 @@ export async function applyLayeredPatch({ target: rawTarget, profile, winBashPat
     bootstrapTools,
     disabledSourceRows,
     appendedToolGroups: stamped.appended,
-    filesToCopy: Object.keys(SOURCE_FILES).filter((name) => name === 'context-gate.mjs' || name === 'compaction-epoch.mjs' || name === 'instruction-hint.mjs' || name === 'dev-tool-search.mjs' || name === 'skill-search.mjs' || (profile.mode === 'anchored' ? name === 'tool-bootstrap.mjs' : name === 'zero-tool-bootstrap.mjs') || (profile.mode !== 'anchored' && name === 'anchor-turn.mjs')),
+    filesToCopy: layerFileNames(profile),
   }
   if (dryRun) return { plan, written: false, composition: finalComposition }
 
