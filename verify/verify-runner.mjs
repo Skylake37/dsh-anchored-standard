@@ -29,6 +29,7 @@ import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { createFirstAssistantCanceller } from './first-assistant-canceller.mjs'
 
 /** Stable Cordis plugin name. */
 export const name = 'verify-runner'
@@ -38,7 +39,6 @@ export const inject = ['agentDefaultModel', 'agents', 'sessions', 'agentPresets'
 
 export const Config = z.object({
   task: z.string().required(),
-  secondTask: z.string(),
   preset: z.string().default('anchored-standard'),
   cwd: z.string().default(process.cwd()),
   provider: z.string(),
@@ -99,40 +99,26 @@ async function run(ctx, config, io) {
   })
   await agent.whenIdle()
   const firstSeq = agent.session.seq
-  const twoPhase = typeof config.secondTask === 'string' && config.secondTask.length > 0
 
   // Optional: cancel as soon as the first assistant message is durable, so a
-  // verbose multi-tool run does not burn the whole task budget. Skipped for
-  // two-phase runs, which need the first turn to finish before the second task.
-  let cancelled = false
-  const watch = setInterval(() => {
-    if (cancelled || twoPhase) return
-    const hit = agent.session.events.some((event) => event.type === 'assistant/message' && event.seq >= firstSeq)
-    if (hit) {
-      cancelled = true
-      agent.cancel({ kind: 'user' })
-    }
-  }, 100)
+  // verbose multi-tool run does not burn the whole task budget. The watcher is
+  // scheduled ONLY when the mode is enabled (issues #56/#57): with the default
+  // `stopAfterFirstAssistant: false` the run must continue through promotion.
+  const firstAssistantWatch = createFirstAssistantCanceller({
+    agent,
+    firstSeq,
+    enabled: config.stopAfterFirstAssistant,
+  })
 
   agent.followup(createUserMessage({
     content: [{ type: 'text', text: config.task }],
     source: { kind: 'user' },
   }))
   await agent.whenIdle()
-
-  let secondSeq = undefined
-  if (twoPhase) {
-    secondSeq = agent.session.seq
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: config.secondTask }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-  }
-  clearInterval(watch)
+  firstAssistantWatch?.stop()
   await sessions.flush(agent.session)
 
-  // Report: session identity, every request header, then every assistant reply.
+  // Report: session identity, every request header, then the first assistant reply.
   const out = []
   out.push(`sessionId: ${agent.session.id}`)
   out.push(`preset: ${config.preset}`)
@@ -141,23 +127,22 @@ async function run(ctx, config, io) {
     if (event.type !== 'request/header') continue
     out.push(`request/header [${event.data.reason}] ${headerLine(event.data.header)}`)
   }
-  const assistants = agent.session.events
-    .filter((event) => event.type === 'assistant/message' && event.seq >= firstSeq)
-    .map((event) => event.data.message)
-  assistants.forEach((message, index) => {
-    const blocks = (message?.content ?? []).map((block) => {
+  const firstAssistant = agent.session.events.find((event) => event.type === 'assistant/message' && event.seq >= firstSeq)
+  if (firstAssistant === undefined) {
+    out.push('(no assistant/message recorded)')
+  } else {
+    const blocks = (firstAssistant.data.message?.content ?? []).map((block) => {
       if (block.type === 'text') return `text: ${block.text}`
       if (block.type === 'reasoning') return `reasoning: ${block.text}`
       return `block: ${JSON.stringify(block)}`
     })
-    out.push(`assistant/message #${index + 1} (${blocks.length} blocks):`)
+    out.push(`first assistant/message (${blocks.length} blocks):`)
     for (const line of blocks) out.push(line)
-  })
-  if (assistants.length === 0) out.push('(no assistant/message recorded)')
+  }
   // Which user-message sources reached the first step: the bootstrap strip
   // removes agent-instructions and skill-catalog until promotion.
   const beforeAssistant = agent.session.events.filter(
-    (event) => event.seq >= firstSeq && event.seq < (secondSeq ?? Number.POSITIVE_INFINITY),
+    (event) => event.seq >= firstSeq && event.seq < (firstAssistant?.seq ?? Number.POSITIVE_INFINITY),
   )
   const userSources = beforeAssistant
     .filter((event) => event.type === 'user/message')

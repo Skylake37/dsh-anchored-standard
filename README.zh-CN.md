@@ -2,13 +2,30 @@
 
 [English](./README.md)
 
-实验性 DeepSeek Harness agent preset 集合——一个基础模式加两个变体：首轮模型请求锚定在
-Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文），会话产生持久信号后晋升到
-小型 resident 目录，重型 Standard 工具按需解锁。
+实验性 DeepSeek Harness agent preset 集合——一个基础模式、两个实时锚定变体和一个预制
+会话模式：把模型轨迹锚定在 Minimal 条件上（真实的 Minimal 工具 schema、不注入自动
+上下文），会话产生持久信号后晋升到小型 resident 目录，重型 Standard 工具按需解锁。
 
 这是社区项目，并非 DeepSeek 官方 preset，也不代表 DeepSeek 的认可或背书。
 
 欢迎您将插件的使用反馈以Issue或PR的形式进行提交,对于新插件的思路或有用的发现请在[仓库](https://github.com/0liveiraaa/DeepseekCotexplorations)下提交。
+
+## 项目状态（2026-08-17）
+
+随着 DeepSeek 官方 API 与 opencode go 订阅先后涨价，本项目的主动开发已基本停止：
+这些 preset 依赖的评测循环（Project2 级别的完整跑分、多轮 roll/探针实验）在当前
+价格下已无法负担。仓库维持现状可用，仅接受**维护性更新**（bug 修复与力所能及的
+harness 兼容性跟进）。机制结论、剂量实验数据与工具链（context-gate、prefab 管线、
+探针套件）仍然有效，且基本与模型无关。维护者写了一份个人感想：
+[FAREWELL.md](./FAREWELL.md)；参与项目协作、代码、研究与复现的社区成员见
+[致谢名单](./ACKNOWLEDGEMENTS.md)。
+
+社区中反馈在部分场景效果更好的项目：
+
+- [dsh-routing-suite](https://github.com/yjh051108/dsh-routing-suite)——运行时注入器
+  + 任务感知的思维模式路由 preset（router-standard 家族）。
+- [J-Space Cognition Suite](https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6)——
+  模型不可知的推理时认知控制层，以 Skill 形式封装。
 
 ## 模式总览
 
@@ -17,11 +34,13 @@ Minimal 条件上（真实的 Minimal 工具 schema、不注入自动上下文�
 | Anchored Standard | `preset/` | 2 个工具（Minimal 对） | Minimal 工具 schema | 首次持久 `tool/call` **或** `assistant/message`（`promoteOn: either`） | 无 |
 | Zero-Anchored Standard | `zero-anchored-standard/` | 0 个工具 | 一轮固定锚定消息 | 锚定回复（`assistant/message`） | 多一次模型调用 |
 | Whoami Standard | `whoami-standard/` | 0 个工具 | 一轮"你是谁"自我介绍 | 自我介绍回复（`assistant/message`） | 多一次模型调用 |
+| Prefab Anchored Standard | `prefab/` | 已 roll 的历史种子 | 内置成功轨迹 | 种子中已经晋升 | 实例化不调用模型 |
 | Eternal Minimal | `eternal-minimal/` | 永远只有 2 个工具 | 可见目录永不增长；重型工具经 `dshx` bash 网关真实执行 | 无（无阶段概念） | 无 |
 | Wire Think-Execute Standard | `wire-think-standard/` | 工具在场 + wire 层 `tool_choice: none` | 思考步路由到兄弟 provider | 按轮：steer 本身 | 每轮 +1 调用、前缀缓存抖动 |
 | Combo Anchored | `combo-anchored/` | 每轮用户消息先 0 工具深思 | 思考/执行分离 + 深度闸门 + 深思滴灌三行独立拼装 | 按机制各自生效 | 每轮 +1 调用 |
 
-每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。
+每个模式目录都自包含，可单独复制安装到任意 id（见[安装](#安装)）。Prefab 在模式选中
+后直接原位预填充当前空会话，不需要针对每个工作区导入或离线实例化。
 
 ## 术语
 
@@ -82,10 +101,14 @@ Anchored Standard 把"首次轨迹选择"和"后续完整工具能力"拆开：
 1. 保持 Minimal 的完整 system prompt；
 2. 首次模型请求暴露 Minimal 预设的**真实工具 schema**——持久 `bash` +
    `str_replace_editor`，与官方 Minimal 组装逐字节一致（上述杠杆 1）；
-3. 首次请求同时剥离自动注入的上下文——AGENTS.md/CLAUDE.md 工作区摘要和可用技能
-   目录提醒，真正的 Minimal 根本不挂载这两个插件（`tool-bootstrap` 行的
-   `suppressedContextSources`；杠杆 3）。用户主动的技能手势不被过滤，且两者从
-   请求 #2 起原样恢复；
+3. 首次请求同时压制**所有**自动注入的上下文——在 harness 的两条统一注入路径上拦截，
+   而不是按来源点名（置首的 `context-gate` 行；杠杆 3）。会话未晋升期间：装配的动态
+   runtime-context 贡献被清空（覆盖整个 `SystemPrompt.context()` 家族：沙箱/审批策略
+   快照和任何第三方上下文提供者），pre-step 瀑布只保留本轮 CLAIMED 的消息批次加一个
+   很小的 kind 白名单（用户主动的技能手势放行；技能目录、AGENTS.md 摘要、time/tmux
+   上下文、hooks、未知第三方注入默认全剥）。晋升后门打开，循环自身的快照投影会在
+   下一个请求恰好差分注入一条全新 runtime-context 消息——首轮极简、二轮注入。
+   `compaction/end` 边界同样会重新关门；
 4. 会话出现首次持久晋升信号（`tool/call` 或首次 `assistant/message`，先到者为准）
    后晋升到 **resident 目录**：bootstrap 对 + 发现工具 + 模型已通过
    `dev_tool_search` 显式解锁的工具。晋升时一次性倒出完整 Standard 目录会把轨迹
@@ -103,44 +126,69 @@ Anchored Standard 把"首次轨迹选择"和"后续完整工具能力"拆开：
 
 ## 实测结果
 
-Project2 V4.1b、DeepSeek V4 Pro、`reasoningEffort=max`、Windows 原生环境：
+Anchored 系列在 Project2 上完成了三轮 V4 Pro 验证，分数为 98、99、99。出处说明
+（issue #60）：那三轮早于当前实现——当时用的是 Minimal 系统提示 + 首请求
+`pwsh` + `read` 工具面，晋升后放开到完整 25 工具 Standard 目录；精确的 Minimal 对
+（持久 `bash` + `str_replace_editor`）加小 resident 目录是之后才引入的。默认内置的
+通用 prefab 已移除 Project2 专属 warm-up 事实，但在 API 涨价前没有重新跑完整评测，
+因此不能把上述分数直接归因于通用模板。
 
-| 运行 | Ability | reasoning 块 | `we` | `let's` | `let me` | 可见回复 |
-|---|---:|---:|---:|---:|---:|---:|
-| r1 | 98 | 193 | 179 | 88 | 1 | 1 |
-| r2 | 99 | 162 | 165 | 98 | 0 | 1 |
+独立复现情况：轨迹锚定被强复现，但能力差在小样本下未决——见
+[#65](https://github.com/xiaobright/dsh-anchored-standard/issues/65)
+（锚定按预设 9/9 完全分离；anchored−standard +3.3，95% CI [−2.6, +9.3]）与
+[#51](https://github.com/xiaobright/dsh-anchored-standard/issues/51)
+（多环境 11 轮，Ability 85–90，未复现 98/99）。上述分数请视为我们的原始观测，
+而非已确立的效应量。
 
-两轮都只出现两份工具目录快照：首次为 Minimal 两工具，随后为 25 项 Standard 工具
-（这两轮早于晋升后收窄到 resident 目录的改动——见[工作原理](#工作原理)）。这证明该
-方案在本题同配置下可以复现，不代表它对所有模型和任务都普遍增益。
+研究记录统一放在配套的探索仓库
+[DeepseekCotexplorations](https://github.com/0liveiraaa/DeepseekCotexplorations)
+（数据与方法；本仓库只放代码）：
 
-跨版本证据（issue #11，Windows + 官方端点，只统计首请求轨迹）：adapter 默认
-maxTokens 下，Minimal 工具 schema 5/5 锚定（首行 `We need modify…`，`we` 1.4，
-`let me` 0.0）；而 pwsh/read、仅 pwsh、沙箱 bash/read 全部 11/11 出现 standard-like
-首行——256000 下决定首轮锚定的是工具 schema，不是输出封顶。
+- [工具面剂量 + Project2 复现](https://github.com/0liveiraaa/DeepseekCotexplorations/tree/main/contributions/xiaobright-v4-tool-surface-dose-response/)——方法、
+  各轮口径、工具面实验和限制。
+- [锚定质量块量化 + 单请求探针方法论](https://github.com/0liveiraaa/DeepseekCotexplorations/tree/main/contributions/xiaobright-v4-anchor-mass-probe/)——prefab
+  模板质量模型与涨价后的低成本评估循环。
 
-完整方法和聚合证据见
-[`xiaobright/modeltest`](https://github.com/xiaobright/modeltest)。
+开发过程记录（做了什么、为什么、踩坑清单）留在本仓库的
+[`HANDOFF.md`](./HANDOFF.md) 与 [`HANDOFF-2.md`](./HANDOFF-2.md)。
 
 ## 配置参考
 
 所有开关都是各模式 `agent.cordis.yml` 中的行。未知键在 preset 挂载时报错。
 
-`tool-bootstrap`（位于 `preset/agent.cordis.yml`；该行必须保持 FIRST——瀑布注册顺序
-决定首请求剥离是否生效）：
+`context-gate`（在 `preset/`、`zero-anchored-standard/`、`whoami-standard/` 中均挂在
+FIRST 行——瀑布注册顺序使门成为最外层变换；插件本体在 `shared/context-gate.mjs`，
+可供任何其他需要统一注入控制的组合单独复用）：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `promoteOn` | `either` | 晋升触发：`either` / `tool-call` / `assistant-message`（两个变体用 `assistant-message`）。 |
+| `includeSubagents` | `false` | 子 agent 同样过门（基础模式与 whoami 设 `true`；与 bootstrap 行保持一致）。 |
+| `enabled` | `true` | `false` 关闭两条拦截路径（不动行集合即可做 A/B）。 |
+| `allowKinds` | `[skill-invocation]` | claimed 批次之外放行的 `source.kind`；`[]` 表示只保留 claimed 批次。 |
+
+注入控制的分工：会话相位级抑制（一切以晋升边界为键）归 `context-gate`。
+两个有文档说明的例外保留各自的枚举式 `suppressedContextSources`，因为门的相位机
+覆盖不了它们的作用域：`think-phase`/`wire-think` 的 think-step 级剥离（按步而非
+按会话相位），以及 `eternal-minimal` 的永驻逐请求剥离（没有晋升边界；且已冻结在
+其实测记录所用的配置下）。
+
+`tool-bootstrap`（位于 `preset/agent.cordis.yml`；紧跟在 `context-gate` 之后挂载）：
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `bootstrapTools` | `[bash, str_replace_editor]` | 请求 #1 可见的工具。 |
 | `promoteOn` | `either` | 晋升触发：`either` / `tool-call` / `assistant-message`。 |
 | `bootstrapMaxTokens` | 未设 | 请求 #1 的可选输出封顶；晋升后剥离。 |
-| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | bootstrap 期间剥离的 `source.kind`；`[]` 关闭过滤。 |
+| `includeSubagents` | `false` | 子 agent 同样走 bootstrap 阶段（基础模式设 `true`）。 |
 | `compactionTools` | `[]` | compaction 边界到再晋升之间可用的额外工具。 |
 
 `zero-tool-bootstrap`（位于 `zero-anchored-standard/` 和 `whoami-standard/`）：
-`suppressedContextSources` 与 `compactionTools` 语义相同（晋升恒为首次
-`assistant/message`），另有 `includeSubagents`——子 agent 是否也走锚定阶段
-（`whoami-standard` 设 `true`，`zero-anchored-standard` 为 `false`）。
+`compactionTools` 语义相同（晋升恒为首次 `assistant/message`），另有
+`includeSubagents`——子 agent 是否也走锚定阶段（`whoami-standard` 设 `true`，
+`zero-anchored-standard` 为 `false`）。上下文抑制不在此行——两个变体均在首行挂载
+`context-gate`（`promoteOn: assistant-message`）；原来的 `suppressedContextSources`
+键现在会在挂载时报错。
 
 `anchor-turn`（两个变体）：`text`——合成的首条用户消息（zero-anchored 默认
 "This round is a test. Tools are not open yet; all tools will open next round."，
@@ -155,7 +203,7 @@ whoami 为"你是谁"）；`includeSubagents`——子 agent 是否也走锚定�
 | `gateway` | `true` | 拦截 `dshx` shell 命令并真实执行对应工具；`false` 只留裸 Minimal 对。 |
 | `gatewayCommand` | `dshx` | 拦截命令词。 |
 | `maxGatewayChars` | `12000` | 单次网关结果负载上限。 |
-| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | 每个请求都剥离（没有晋升边界）。 |
+| `suppressedContextSources` | `[agent-instructions, skill-catalog]` | 每个请求都剥离（没有晋升边界；有意保留枚举实现，见上方分工说明）。 |
 
 
 `cot-drip`（位于 `combo-anchored/`）：
@@ -192,13 +240,17 @@ preset/                  Anchored Standard——基础模式
 zero-anchored-standard/  变体：固定零工具锚定轮
 whoami-standard/         变体："你是谁"锚定轮，子 agent 继承
 eternal-minimal/         变体：Minimal 对永恒 + dshx bash 网关
-wire-think-standard/       变体：wire 层条件（工具定义在场 + 调用禁止）
+wire-think-standard/     变体：wire 层条件（工具定义在场 + 调用禁止）
 combo-anchored/          组合包：思考分离 + 闸门 + 滴灌三行拼装
 shared/                  多模式共用插件的唯一源
 scripts/sync-modes.mjs   把 shared/ 插件物化到每个模式目录
 test/                    零依赖测试套件（npm test）
 verify/                  一次性 headless 验证 runner
+prefab/                  Prefab Anchored Standard + 内置会话模板
 ```
+
+`prefab/` 默认提供通用模板，并把 Project2 专用模板保留为显式 opt-in。二者都包含真实
+模型推理，使用前请阅读该模式的[安装说明](./prefab/README.md)。
 
 不变量，由 `npm run check` 强制：
 
@@ -206,7 +258,9 @@ verify/                  一次性 headless 验证 runner
   `./本地.mjs`，绝不允许 `../`。
 - 多模式共用插件只在 `shared/` 存一份；模式目录里的副本是生成的。编辑 `shared/`、
   运行 `npm run sync`、两者一起提交——绝不直接改物化副本。
-- `tool-bootstrap` 行保持 `preset/agent.cordis.yml` 的 FIRST 行。
+- `context-gate` 行保持 `preset/agent.cordis.yml` 的 FIRST 行（门必须先于所有注入
+  插件注册），`tool-bootstrap` 紧随其后。`zero-anchored-standard/` 与
+  `whoami-standard/` 中的 `context-gate` 行同样必须保持 FIRST 行。
 
 本仓库刻意不提供 AGENTS.md/CLAUDE.md：这套 preset 的机制核心就是干净的首请求——
 恰恰要从首请求里剥离这些指令文件摘要（issue #6：注入在场时 0/9 锚定）。仓库里放
@@ -220,6 +274,12 @@ verify/                  一次性 headless 验证 runner
 - 仓库提交 [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a)
 - Windows / Node.js 24
 
+持久 shell 的 `shellPath` 按环境自适应：`/bin/bash` 存在的传统主机保持
+terminal-bash 插件的默认行为不变；仅当该绝对路径不存在（如 NixOS，bash
+位于 Nix store 中）时才回退为 `bash`（PATH 查找）。自带 `/bin/bash` 的主机
+行为与之前完全一致，回退分支只在默认值会导致每次 bash 调用都报
+"PTY shell exited during startup" 的环境上生效。
+
 在 `0.1.0-rc.5` 源码检出上，`bootstrapMaxTokens` 能到达实际首请求（首份
 `request/header` 记录封顶值，`adapterDefaults` 为空），因为 `llm.prepareCall`
 只在提案 config 没有 maxTokens 时才物化默认值。issue #11 观察到的一个预构建 profile
@@ -232,10 +292,18 @@ Standard 组装的完整快照；升级 Harness 后，应先对照上游改动�
 
 ## 安装
 
+Prefab 模式推荐由 AI agent 一键安装：把本仓库交给编程 agent，让它执行
+[安装 Agent 操作契约](./prefab/AGENT_INSTALL.md)。Agent 报告 `INSTALL READY` 后，
+启动 DSH，在目标工作区选择 **Prefab Anchored Standard** 模式并新建会话，然后直接
+发送真实任务提示词。该命令默认安装通用模板；Project2 评测模板必须显式传入
+`--template project2`，并默认使用独立 preset id。
+
 克隆本仓库，将整个 `preset` 目录复制到用户 preset 根目录，并将目标目录命名为
-`anchored-standard`。仓库中的每个模式目录都是自包含的：`zero-anchored-standard/`
-与 `whoami-standard/` 变体以同样方式安装，可只装其中一个、多个或全部，不依赖
-其他目录（见下文各自的章节）。
+`anchored-standard`。仓库中的每个模式目录都是自包含的：`zero-anchored-standard/`、
+`whoami-standard/`、`prefab/`、`eternal-minimal/`、`wire-think-standard/`、
+`combo-anchored/` 变体以同样方式安装，可只装其中一个、多个或全部，不依赖
+其他目录（见下文各自的章节）。`prefab/` 选择模式时会自动预填充内置模板；
+按 [`prefab/README.md`](./prefab/README.md) 操作。
 
 PowerShell：
 
@@ -299,10 +367,10 @@ npm test
 - bootstrap 工具缺失时降级为完整目录并一次性告警，不再让请求失败，组合漂移不会锁死
   会话；非法的 `promoteOn` 值会在 preset 挂载时报错；
 - 晋升判定按会话在进程内记忆化，持久事件扫描每会话每进程只执行一次。
-- 会话未晋升期间，pre-step 过滤器剥离 `source.kind` 列在 `suppressedContextSources`
-  中的消息（默认 `agent-instructions` 与 `skill-catalog`，即 Standard 比 Minimal 多出的
-  两项自动注入）。设为 `[]` 可关闭上下文过滤；加入其他 `source.kind` 可抑制更多。
-  过滤器自身出错时降级为保留全部消息，绝不吞掉上下文。
+- 会话未晋升期间，`context-gate` 插件关闭两条统一注入路径：装配的 runtime-context
+  贡献被清空（整个 `SystemPrompt.context()` 家族，无需按来源枚举），pre-step 瀑布
+  只保留 claimed 批次加 `allowKinds` 条目。晋升时循环的快照投影恰好差分注入一条全新
+  runtime-context 消息；门自身出错时降级为保留全部消息，绝不吞掉上下文。
 - 工具目录在晋升时变化一次，之后每次 `dev_tool_search` 解锁新工具再变化；前缀缓存
   连续性在这些点上断开；
 - preset 与 shell 访问具有相同信任等级，安装前应自行审阅文件；

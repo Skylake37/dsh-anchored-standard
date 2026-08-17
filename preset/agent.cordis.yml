@@ -18,34 +18,53 @@
 # pool instances — `provide()` throws on the second registration under the
 # same realm symbol; labels join REALMS, and are not what this file needs.)
 
-# ── bootstrap (must stay FIRST) ─────────────────────────────────────────────
+# ── context gate (must stay FIRST) ──────────────────────────────────────────
 
-# This row deliberately sits before every other row: dsh-agent-instructions and
-# dsh-tool-skill inject workspace instructions and the skill catalog into the
-# first request via the agent/pre-step waterfall, and waterfall after-next
-# transforms apply in reverse registration order. Registering first (plus the
-# plugin empty inject list and the listener's `prepend` flag) makes this filter
-# strip the final transform, so request #1 stays Minimal-exact (see issue #6).
+# Unified injection control (shared/context-gate.mjs, reusable by any preset):
+# while the session is unpromoted, BOTH unified injection paths are closed.
+# The assembly's dynamic runtime-context contributions are blanked — the whole
+# `SystemPrompt.context()` family (sandbox/approval policy snapshots and any
+# third-party context provider) without enumerating them — and the pre-step
+# waterfall keeps ONLY the claimed message batch plus the `allowKinds` entries
+# (a user skill gesture survives; every automatic injection — skill catalog,
+# AGENTS.md digest, time/tmux context, hooks, unknown third-party plugins — is
+# stripped by default). After the first durable promotion signal (a tool call
+# OR the first assistant message, `promoteOn: either`) the gate opens, and the
+# loop's own snapshot projection diffs exactly ONE fresh runtime-context
+# message into the next request: minimal first round, injections on the second
+# round. A `compaction/end` boundary re-closes the gate the same way.
 #
-# V4 Pro conditions strongly on the API tool catalog AND the first request
-# output budget. Bootstrap request #1 with the OFFICIAL Minimal preset's real
-# tool pair — persistent `bash` + `str_replace_editor` — which anchors at the
+# This row deliberately sits before every other row: waterfall after-next
+# transforms apply in reverse registration order, so registering first (plus
+# the empty inject list and the pre-step listener's `prepend` flag) makes the
+# gate the outermost transform — nothing registered later re-injects past it
+# (see issue #6).
+#
+# `includeSubagents: true` gates subagents the same way — their first request
+# is clean too, and their own first reply or tool call opens the gate — so a
+# delegation cannot reintroduce an uncontrolled first request (issues #38 and
+# #52). Keep this flag in sync with the tool-bootstrap row below.
+- id: context-gate
+  name: ./context-gate.mjs
+  config:
+    promoteOn: either
+    includeSubagents: true
+    allowKinds: [skill-invocation]
+
+# ── bootstrap ───────────────────────────────────────────────────────────────
+
+# Tool catalog control (mode-owned tool-bootstrap.mjs). V4 Pro conditions
+# strongly on the API tool catalog AND the first request output budget:
+# request #1 exposes the OFFICIAL Minimal preset's real tool pair —
+# persistent `bash` + `str_replace_editor` — which anchors at the
 # adapter-default maxTokens (256000) with no output cap needed (issue #11:
 # 5/5 anchored vs 11/11 standard-like for every standard-family schema);
 # after the session records its first durable promotion signal (a tool call OR
 # the first assistant message, default `promoteOn: either`), later steps
 # narrow to the minimal RESIDENT set (see below). `bootstrapMaxTokens` is
 # opt-in for standard-schema bootstraps; unset, the adapter default flows. See
-# tool-bootstrap.mjs for the other triggers.
-#
-# The same phase gate suppresses AUTO-INJECTED context on request #1:
-# `suppressedContextSources` lists the `agent/pre-step` message sources the
-# bootstrap filter strips while the session is unpromoted. The defaults are the
-# two automatic injections Standard adds over Minimal — the available-skills
-# reminder (`skill-catalog`) and the workspace instruction digest
-# (`agent-instructions`). User-initiated skill gestures are not filtered, and
-# both injections return unchanged from request #2 on. Set the list to [] to
-# disable the context filter while keeping the tool bootstrap.
+# tool-bootstrap.mjs for the other triggers. Context stripping is NOT here —
+# the context-gate row above owns it.
 #
 # POST-PROMOTION (local addition): the promoted catalog is NOT the full
 # Standard dump — it stays on the bootstrap pair + the three discovery tools
@@ -57,12 +76,16 @@
 # to the controlled phase — bootstrap pair + `compactionTools` — until a NEW
 # durable promotion signal exists past the boundary (epoch-aware, see
 # compaction-epoch.mjs).
+#
+# `includeSubagents: true` keeps the subagent phase in sync with the
+# context-gate row: a subagent's first request sees the bootstrap pair, then
+# its own first reply or tool call promotes it to the resident set.
 - id: tool-bootstrap
   name: ./tool-bootstrap.mjs
   config:
     bootstrapTools: [bash, str_replace_editor]
     promoteOn: either
-    suppressedContextSources: [agent-instructions, skill-catalog]
+    includeSubagents: true
     # Post-compaction core work set: the model is mid-task and needs to keep
     # working, but faces a small catalog instead of the full Standard set.
     compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
@@ -85,11 +108,17 @@
 # that perturbs the trajectory even after promotion. Instead, after promotion
 # ONE short hint is injected once per session — "these instruction files
 # exist; read them before acting" — and the model reads the files itself via
-# the filesystem tools when relevant.
+# the filesystem tools when relevant. The once-per-session guard is DERIVED
+# FROM DURABLE EVENTS (restart-safe): a process restart must never inject a
+# second hint with the same deterministic message id — the duplicate id
+# breaks history replay. `includeSubagents: true` makes a subagent's own
+# first reply or tool call open its hint, keeping it out of the context
+# gate's stripped first request.
 - id: instruction-hint
   name: ./instruction-hint.mjs
   config:
     promoteOn: either
+    includeSubagents: true
 
 # On-demand tool discovery (the tool-search pattern, local addition): the
 # promoted catalog keeps a minimal resident set; heavier Standard tools
@@ -120,12 +149,19 @@
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
 
-# The Minimal preset's shell: a PTY-backed persistent bash, byte-identical in
-# configuration to the official `minimal` preset's `persistent-shell` group so
-# the first request exposes exactly Minimal's real `bash` schema. The PTY
-# registry is an agent-owned service, so it lives in an entry-local realm; the
-# backend still consumes the host sandbox policy and subprocess implementation,
-# while the tool registers into this agent's scoped catalog.
+# The Minimal preset's shell: a PTY-backed persistent bash, schema-identical
+# to the official `minimal` preset's `persistent-shell` group so the first
+# request exposes exactly Minimal's real `bash` schema. ONE deliberate config
+# difference: an adaptive `shellPath` — the terminal-bash plugin default
+# `/bin/bash` where that absolute path exists (every host that ships it keeps
+# the previous behavior), otherwise a bare `bash` resolved through the same
+# scrubbed PATH the other harness tools use. The fallback exists because
+# `/bin/bash` does not exist on NixOS and other hosts that keep bash
+# elsewhere; there `execvp("/bin/bash")` exits during PTY startup ("PTY shell
+# exited during startup") and every bash call fails. The PTY registry is an
+# agent-owned service, so it lives in an entry-local realm; the backend still
+# consumes the host sandbox policy and subprocess implementation, while the
+# tool registers into this agent's scoped catalog.
 #
 # DISABLED ON WINDOWS: DSH's PTY backend is linux/darwin-only, so the
 # persistent shell cannot serve win32. The `custom-bash` row below registers
@@ -143,6 +179,7 @@
     - id: terminal-bash
       name: '@deepseek-ai/dsh-terminal-bash'
       config:
+        shellPath: !!js "process.getBuiltinModule?.('node:fs')?.existsSync('/bin/bash') ? '/bin/bash' : 'bash'"
         timeoutMs: 300000
 
     - id: persistent-bash
@@ -162,15 +199,18 @@
 # Windows-only `bash` tool (see custom-bash.mjs): registers the SAME
 # tool name as the persistent shell with a Minimal-compatible description, but
 # executes through the ordinary cross-platform subprocess seam (`bash -c`)
-# instead of a PTY. `bashPath` defaults to `bash` on PATH; point it at Git
-# Bash explicitly when the WSL shim would otherwise be picked up. No OS
+# instead of a PTY. The shell is resolved WITHOUT a hardcoded install path
+# (issue #24): `bashPath` unset probes the `git` executable's install root,
+# then the well-known Git-for-Windows roots (Program Files(/x86), per-user
+# LOCALAPPDATA, scoop's `current` junction), then plain `bash` on PATH — set
+# `bashPath` explicitly only to pin a shell that probing cannot find. No OS
 # sandbox confinement on Windows (landlock is linux-only); the tool
-# description says so.
+# description says so. When no bash exists at all the tool errors with
+# guidance instead of switching shells — pwsh stays its own tool in the
+# promoted catalog.
 - id: custom-bash
   name: ./custom-bash.mjs
   disabled: !!js process.platform !== 'win32'
-  config:
-    bashPath: 'C:\Program Files\Git\bin\bash.exe'
 
 # ── filesystem ──────────────────────────────────────────────────────────────
 

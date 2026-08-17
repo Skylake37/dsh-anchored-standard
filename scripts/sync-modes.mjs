@@ -28,7 +28,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
 /** Installable mode directories with their mode-owned (non-shared) plugins. */
 const MODES = [
-  { dir: 'preset', own: ['tool-bootstrap.mjs'] },
+  { dir: 'preset', own: [] },
+  { dir: 'prefab', own: ['install.mjs', 'instantiate.mjs', 'roll-prefab.mjs', 'roll-runner.mjs', 'analyze-template.mjs', 'probe-clone.mjs', 'probe-clone-runner.mjs'] },
   { dir: 'zero-anchored-standard', own: [] },
   { dir: 'whoami-standard', own: [] },
   { dir: 'eternal-minimal', own: ['eternal-minimal.mjs'] },

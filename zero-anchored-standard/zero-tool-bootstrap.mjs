@@ -29,12 +29,14 @@
  * first request: after a compaction the model is mid-task and needs to keep
  * working, but still faces a small catalog instead of the full Standard set.
  *
- * Injected reminders (the AGENTS.md digest and the `<available_skills>`
- * catalog, source kinds `agent-instructions` / `skill-catalog`) are stripped
- * during the controlled phase — same reasoning as the anchored variant
- * (issue #6: with the skill catalog present the anchor did not reproduce at
- * all, 0/9). `suppressedContextSources` is configurable; an empty array
- * disables the context filter while keeping the tool bootstrap.
+ * Injected reminders are NOT stripped here. Unified injection control lives
+ * in the `context-gate` row, which both mode compositions mount FIRST (see
+ * their agent.cordis.yml): while unpromoted it closes both unified injection
+ * paths (the whole `SystemPrompt.context()` family plus a default-deny
+ * pre-step gate), replacing this plugin's former enumerated
+ * `suppressedContextSources` strip. The gate is strictly stronger: the enum
+ * only filtered pre-step messages by `source.kind` and could not reach the
+ * assembly's runtime-context contributions at all.
  *
  * Robustness:
  *  - Promotion decisions are memoized per session id for this process; the
@@ -53,20 +55,18 @@ export const name = 'zero-tool-bootstrap'
 
 /**
  * Deliberately NO inject list: the listeners only touch services at event
- * time, and the pre-step strip below registers with `prepend: true` so it
- * stays the OUTERMOST waterfall transform (see the anchored copy for the full
- * registration-order reasoning).
+ * time.
  */
 export const inject = []
-
-/** Same automatic injections the anchored variant strips by default. */
-const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions']
 
 /** Shell candidates (the anchored preset's custom-bash registers `bash`; pwsh is Windows standard). */
 const SHELLS = ['bash', 'pwsh']
 
 /** Discovery tools always resident after promotion (the tool-search pattern). */
 const RESIDENT_DISCOVERY_TOOLS = ['dev_tool_search', 'skill_search', 'skill_load']
+
+/** Config keys this plugin accepts; anything else fails at mount (the removed `suppressedContextSources` included — migrate to the context-gate row). */
+const ALLOWED_KEYS = new Set(['compactionTools', 'includeSubagents'])
 
 function stringListOrEmpty(value, field) {
   if (value === undefined) return []
@@ -76,21 +76,23 @@ function stringListOrEmpty(value, field) {
   return [...new Set(value)]
 }
 
-function sourceList(value, field, fallback) {
-  if (value === undefined) return new Set(fallback)
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.length === 0)) {
-    throw new TypeError(`${name}: ${field} must be an array of non-empty strings`)
-  }
-  return new Set(value)
-}
-
 /** Register the per-session bootstrap filters. */
 export function apply(ctx, config) {
+  const source = config === undefined ? {} : config
+  if (typeof source !== 'object' || source === null || Array.isArray(source)) {
+    throw new TypeError(`${name}: config must be an object`)
+  }
+  const unknown = Object.keys(source).filter((key) => !ALLOWED_KEYS.has(key))
+  if (unknown.length > 0) {
+    throw new TypeError(
+      `${name}: unknown config key(s) ${unknown.join(', ')} — allowed keys: ${[...ALLOWED_KEYS].sort().join(', ')}; `
+      + 'context suppression moved to the context-gate row',
+    )
+  }
   // Core work set exposed after a compaction, before re-promotion.
-  const compactionTools = stringListOrEmpty(config?.compactionTools, 'compactionTools')
-  const suppressedSources = sourceList(config?.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
+  const compactionTools = stringListOrEmpty(source.compactionTools, 'compactionTools')
 
-  const promotion = createEpochPromotion(['assistant/message'], { includeSubagents: config?.includeSubagents === true })
+  const promotion = createEpochPromotion(['assistant/message'], { includeSubagents: source.includeSubagents === true })
   ctx.on('session/event', (session, event) => promotion.observe(session, event))
 
   let warned = false
@@ -176,25 +178,4 @@ export function apply(ctx, config) {
       return assembled
     }
   })
-
-  // Strip injected reminders (skill catalog, AGENTS.md) during the controlled
-  // phase. Same registration discipline as the anchored variant: `prepend`
-  // keeps the strip the OUTERMOST transform of the agent/pre-step waterfall.
-  ctx.on('agent/pre-step', async ({ agent }, next) => {
-    const decision = await next()
-    if (decision.kind === 'reject') return decision
-    try {
-      if (promotion.status(agent).promoted || suppressedSources.size === 0) return decision
-      if (!Array.isArray(decision.messages)) return decision
-      const kept = decision.messages.filter((message) => {
-        const kind = message?.source?.kind
-        return typeof kind !== 'string' || !suppressedSources.has(kind)
-      })
-      return kept.length === decision.messages.length ? decision : { ...decision, messages: kept }
-    } catch (error) {
-      // A filter bug must never eat context: degrade to keeping every message.
-      warnOnce(`${name}: pre-step context filter failed, keeping injected context: ${String((error && error.message) || error)}`)
-      return decision
-    }
-  }, { prepend: true })
 }

@@ -31,14 +31,6 @@ function assemble(listener, events, tools, header = {}, id = 's') {
   )
 }
 
-function prestep(listener, events, messages, id = 's') {
-  return listener({ agent: { session: { id, events, header: {} } } }, async () => ({ kind: 'enter', messages }))
-}
-
-const userMessage = { id: 'u', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }
-const instructionMessage = { id: 'i', content: [], source: { kind: 'agent-instructions' } }
-const catalogMessage = { id: 'c', content: [], source: { kind: 'skill-catalog' } }
-
 test('exports a diagnostic plugin name', () => {
   assert.equal(name, 'zero-tool-bootstrap')
 })
@@ -155,30 +147,13 @@ test('a compaction resets promotion; a new message after the boundary re-promote
   assert.deepEqual(rePromoted.tools.map((tool) => tool.name), ['bash'])
 })
 
-test('the controlled phase strips skill-catalog and agent-instructions messages', async () => {
+test('the controlled phase no longer strips context (context-gate owns it)', () => {
   const { listeners } = register()
-  const decision = await prestep(listeners['agent/pre-step'], [], [userMessage, instructionMessage, catalogMessage])
-  assert.equal(decision.kind, 'enter')
-  assert.deepEqual(decision.messages.map((message) => message.id), ['u'])
+  assert.equal(listeners['agent/pre-step'], undefined)
 })
 
-test('promoted pre-step keeps every injected context message', async () => {
-  const { listeners } = register()
-  const messages = [userMessage, instructionMessage, catalogMessage]
-  const decision = await prestep(listeners['agent/pre-step'], [{ type: 'assistant/message' }], messages)
-  assert.equal(decision.messages, messages)
-})
-
-test('an empty suppressedContextSources disables the context filter', async () => {
-  const { listeners } = register({ suppressedContextSources: [] })
-  const messages = [userMessage, instructionMessage, catalogMessage]
-  const decision = await prestep(listeners['agent/pre-step'], [], messages)
-  assert.equal(decision.messages, messages)
-})
-
-test('the pre-step strip registers with prepend', () => {
-  const { hookOptions } = register()
-  assert.deepEqual(hookOptions['agent/pre-step'], { prepend: true })
+test('the removed suppressedContextSources key fails at mount (migrate to context-gate)', () => {
+  assert.throws(() => register({ suppressedContextSources: ['skill-catalog'] }), /unknown config key.*suppressedContextSources/)
 })
 
 test('invalid compactionTools values fail at apply time', () => {

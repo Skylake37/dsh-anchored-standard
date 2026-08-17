@@ -36,6 +36,19 @@
  *  - Auto-injected context (skill catalog, workspace instructions) is
  *    stripped on EVERY request — the Minimal condition is permanent here,
  *    so there is no promotion boundary to key suppression on.
+ *
+ * FROZEN DESIGN NOTE (2026-08-17): the enumerated `suppressedContextSources`
+ * strip below is intentionally NOT migrated to the shared context-gate.
+ * Two reasons: (1) the gate is session-phase-keyed and this mode has no
+ * promotion boundary — supporting it would need a never-promote mode in the
+ * gate, i.e. new unverified code in a maintenance-phase repository; (2) this
+ * filter is allow-by-default (strips exactly two source kinds, passes
+ * everything else) while the gate is default-deny and also blanks the whole
+ * `SystemPrompt.context()` family — migrating would strip MORE than the
+ * configuration this mode's recorded measurements (Project2 98, n=1) were
+ * taken under, and re-validation is no longer affordable. Session-phase
+ * injection control belongs to context-gate; permanent per-request strips
+ * like this one are a documented exception.
  *  - The gateway refuses to dispatch the shells / str_replace_editor
  *    themselves ("invoke them directly"), which also makes gateway
  *    recursion impossible: a nested bash dispatch never executes.

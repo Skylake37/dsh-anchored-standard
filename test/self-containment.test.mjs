@@ -10,6 +10,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 /** Every installable mode directory, each independently copy-installable. */
 const MODE_DIRS = [
   'preset',
+  'prefab',
   'zero-anchored-standard',
   'whoami-standard',
   'eternal-minimal',

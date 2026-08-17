@@ -36,16 +36,6 @@ function request(listener, events, resolved, id = 's') {
   return listener({ agent: agent(events, id), turn: 1, step: 1 }, async () => resolved)
 }
 
-function prestep(listener, events, messages, id = 's') {
-  return listener({ agent: agent(events, id), turn: 1, step: 1 }, async () => ({ kind: 'enter', messages }))
-}
-
-const userMessage = { id: 'u', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }
-const instructionMessage = { id: 'i', content: [], source: { kind: 'agent-instructions' } }
-const catalogMessage = { id: 'c', content: [], source: { kind: 'skill-catalog' } }
-const gestureMessage = { id: 'g', content: [], source: { kind: 'skill-invocation' } }
-const pluginMessage = { id: 'p', content: [], source: { kind: 'plugin' } }
-
 test('exports a diagnostic plugin name', () => {
   assert.equal(name, 'anchored-tool-bootstrap')
 })
@@ -161,84 +151,17 @@ test('invalid bootstrapMaxTokens fails at apply time', () => {
   assert.throws(() => register({ ...config, bootstrapMaxTokens: 0 }), /bootstrapMaxTokens/)
 })
 
-test('pre-step filter registers with prepend before every other listener', () => {
-  const { hookOptions } = register()
-  assert.equal(hookOptions['agent/pre-step']?.prepend, true)
-})
-
-test('bootstrap pre-step strips skill-catalog and agent-instructions messages', async () => {
+test('the tool filter leaves the assembly contexts alone (context-gate owns them)', async () => {
   const { listeners } = register()
-  const messages = [
-    { id: 'm1', content: [{ type: 'text', text: 'user message' }] },
-    { id: 'm2', content: [{ type: 'text', text: '<system-reminder>skills...</system-reminder>' }], source: { kind: 'skill-catalog' } },
-    { id: 'm3', content: [{ type: 'text', text: '# AGENTS.md content' }], source: { kind: 'agent-instructions' } },
-  ]
-  const decision = await prestep(listeners['agent/pre-step'], [], messages)
-  assert.equal(decision.kind, 'enter')
-  assert.deepEqual(decision.messages.map((message) => message.id), ['m1'])
-})
-
-test('bootstrap strip preserves user skill gestures and other plugin messages', async () => {
-  const { listeners } = register()
-  const decision = await prestep(listeners['agent/pre-step'], [], [
-    userMessage,
-    instructionMessage,
-    catalogMessage,
-    gestureMessage,
-    pluginMessage,
-  ])
-  assert.equal(decision.kind, 'enter')
-  assert.deepEqual(decision.messages.map((message) => message.id), ['u', 'g', 'p'])
-})
-
-test('promoted pre-step keeps every injected context message', async () => {
-  const { listeners } = register()
-  const messages = [userMessage, instructionMessage, catalogMessage, pluginMessage]
-  const decision = await prestep(listeners['agent/pre-step'], [{ type: 'tool/call' }], messages)
-  assert.equal(decision.messages, messages)
-})
-
-test('a text-only first reply promotes the context injections too', async () => {
-  const { listeners } = register()
-  const stripped = await prestep(listeners['agent/pre-step'], [], [userMessage, instructionMessage, catalogMessage], 'a')
-  assert.deepEqual(stripped.messages.map((message) => message.id), ['u'])
-  // Distinct session id: the first (un-promoted) scan must not shadow this one.
-  const kept = await prestep(listeners['agent/pre-step'], [{ type: 'assistant/message' }], [userMessage, instructionMessage], 'b')
-  assert.deepEqual(kept.messages.map((message) => message.id), ['u', 'i'])
-})
-
-test('reject decisions pass through the context filter untouched', async () => {
-  const { listeners } = register()
-  const decision = { kind: 'reject', messages: [userMessage, instructionMessage] }
-  const result = await listeners['agent/pre-step'](
-    { agent: agent([]), turn: 1, step: 1 },
-    async () => decision,
+  const contexts = [{ name: 'sandbox-policy', text: 'sandbox: landlock confinement active' }]
+  const result = await listeners['system-prompt/assemble'](
+    undefined,
+    { agent: agent([]) },
+    async () => ({ system: 'minimal persona', tools: [{ name: 'bash' }, { name: 'str_replace_editor' }], contexts }),
   )
-  assert.equal(result, decision)
-})
-
-test('suppressedContextSources is configurable', async () => {
-  const { listeners } = register({ ...config, suppressedContextSources: ['skill-invocation'] })
-  const decision = await prestep(listeners['agent/pre-step'], [], [userMessage, instructionMessage, catalogMessage, gestureMessage])
-  assert.deepEqual(decision.messages.map((message) => message.id), ['u', 'i', 'c'])
-})
-
-test('an empty suppressedContextSources disables the context filter', async () => {
-  const { listeners } = register({ ...config, suppressedContextSources: [] })
-  const messages = [userMessage, instructionMessage, catalogMessage]
-  const decision = await prestep(listeners['agent/pre-step'], [], messages)
-  assert.equal(decision.messages, messages)
-})
-
-test('invalid suppressedContextSources values fail at apply time', () => {
-  assert.throws(() => register({ ...config, suppressedContextSources: 'agent-instructions' }), /suppressedContextSources/)
-  assert.throws(() => register({ ...config, suppressedContextSources: ['agent-instructions', 42] }), /suppressedContextSources/)
-})
-
-test('the pre-step strip and the budget cap both register with prepend', () => {
-  const { hookOptions } = register({ ...config, bootstrapMaxTokens: 1024 })
-  assert.deepEqual(hookOptions['agent/pre-step'], { prepend: true })
-  assert.deepEqual(hookOptions['agent/request'], { prepend: true })
+  // Unpromoted, yet the contexts flow: injection control is the companion
+  // context-gate plugin's job, not this filter's.
+  assert.equal(result.contexts, contexts)
 })
 
 // ── local additions: resident set, dev_tool_search unlock, compaction ──────
@@ -342,6 +265,26 @@ test('subagents (delegationDepth > 0) are always promoted', async () => {
     async () => ({ system: 'minimal persona', tools }),
   )
   assert.deepEqual(result.tools.map((tool) => tool.name).sort(), ['bash', 'str_replace_editor'])
+})
+
+test('includeSubagents keeps a subagent on the bootstrap pair until its own signal', async () => {
+  const { listeners } = register({ ...config, includeSubagents: true })
+  const tools = [{ name: 'bash' }, { name: 'str_replace_editor' }, { name: 'dev_tool_search' }, { name: 'read' }]
+  const sub = { session: { id: 'sub', events: [], header: { delegationDepth: 1 } } }
+  const fresh = await listeners['system-prompt/assemble'](
+    undefined, { agent: sub }, async () => ({ system: 'minimal persona', tools }),
+  )
+  assert.deepEqual(fresh.tools.map((tool) => tool.name).sort(), ['bash', 'str_replace_editor'])
+  const replied = await listeners['system-prompt/assemble'](
+    undefined,
+    { agent: { session: { id: 'sub2', events: [{ type: 'assistant/message' }], header: { delegationDepth: 1 } } } },
+    async () => ({ system: 'minimal persona', tools }),
+  )
+  assert.deepEqual(replied.tools.map((tool) => tool.name).sort(), ['bash', 'dev_tool_search', 'str_replace_editor'])
+})
+
+test('invalid includeSubagents fails at apply time', () => {
+  assert.throws(() => register({ ...config, includeSubagents: 'yes' }), /includeSubagents/)
 })
 
 test('invalid compactionTools values fail at apply time', () => {

@@ -6,7 +6,7 @@ import { apply, name } from '../shared/instruction-hint.mjs'
 const PROJ_FILES = ['AGENTS.md', 'CLAUDE.md']
 const GLOBAL_FILES = []
 
-function register(header = {}) {
+function register(cfg = {}) {
   const listeners = {}
   const hookOptions = {}
   const fs = {
@@ -32,11 +32,11 @@ function register(header = {}) {
     },
     logger: { warn() {} },
   }
-  apply(ctx, { promoteOn: 'either' })
+  apply(ctx, { promoteOn: 'either', ...cfg })
   return { listeners, hookOptions }
 }
 
-const session = (events, header = {}) => ({ id: 's', events, header: { cwd: 'C:/work', ...header } })
+const session = (events, header = {}, id = 's') => ({ id, events, header: { cwd: 'C:/work', ...header } })
 
 const decision = () => ({ kind: 'enter', messages: [{ id: 'u', role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }] })
 
@@ -65,6 +65,43 @@ test('after promotion ONE hint is injected once per session', async () => {
   // Second call for the same session: no duplicate hint.
   const second = await listeners['agent/pre-step']({ agent }, async () => decision())
   assert.equal(second.messages.length, 1)
+})
+
+test('a process restart does not re-inject: the guard is durable', async () => {
+  // A fresh plugin instance (new process) over a session log that already
+  // carries one hint message — the same deterministic id twice would break
+  // history replay.
+  const { listeners } = register()
+  const agent = { session: session([
+    { type: 'assistant/message', seq: 1, data: {} },
+    { type: 'user/message', seq: 2, data: { id: 'instruction-hint-s', content: [], source: { kind: 'instruction-hint' } } },
+  ]) }
+  const result = await listeners['agent/pre-step']({ agent }, async () => decision())
+  assert.equal(result.messages.length, 1)
+})
+
+test('subagents get the hint immediately by default (they count as promoted)', async () => {
+  const { listeners } = register()
+  const agent = { session: session([], { delegationDepth: 1 }) }
+  const result = await listeners['agent/pre-step']({ agent }, async () => decision())
+  assert.equal(result.messages.length, 2)
+  assert.equal(result.messages[1].source.kind, 'instruction-hint')
+})
+
+test('includeSubagents waits for the subagent own promotion signal', async () => {
+  const { listeners } = register({ promoteOn: 'either', includeSubagents: true })
+  const fresh = { session: session([], { delegationDepth: 1 }, 'sub-fresh') }
+  const none = await listeners['agent/pre-step']({ agent: fresh }, async () => decision())
+  assert.equal(none.messages.length, 1)
+  const replied = { session: session([{ type: 'assistant/message', seq: 1, data: {} }], { delegationDepth: 1 }, 'sub-replied') }
+  const hint = await listeners['agent/pre-step']({ agent: replied }, async () => decision())
+  assert.equal(hint.messages.length, 2)
+  assert.equal(hint.messages[1].source.kind, 'instruction-hint')
+})
+
+test('unknown config keys reject at apply time', () => {
+  assert.throws(() => register({ promoteOn: 'either', includeSubagent: true }), /unknown config key/)
+  assert.throws(() => register({ includeSubagents: 'yes' }), /includeSubagents/)
 })
 
 test('no instruction files found → no hint message', async () => {

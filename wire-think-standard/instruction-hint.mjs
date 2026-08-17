@@ -10,24 +10,35 @@
  *
  * Behavior:
  *  - After the session records its first durable promotion signal
- *    (`promoteOn`, default `either`), ONE hint message is injected (once per
- *    session — durable event scan, resume-safe), listing which instruction
- *    files were found:
+ *    (`promoteOn`, default `either`), ONE hint message is injected, listing
+ *    which instruction files were found:
  *      - user-global: `$DSH_HOME/AGENTS.md`
  *      - project chain: AGENTS.md / CLAUDE.md / AGENTS.local.md / CLAUDE.local.md
  *        walking up from the session cwd to the project root (a directory
  *        containing `.git`, or the cwd itself).
+ *  - The hint is ONCE PER SESSION, DERIVED FROM DURABLE EVENTS: the guard
+ *    scans the session log for an existing `instruction-hint` message (then
+ *    O(1)), so a process restart — whose in-memory state starts empty —
+ *    cannot inject a second copy. A duplicate would collide with the first
+ *    message's deterministic id (`instruction-hint-<sessionId>`) and break
+ *    history replay.
  *  - The hint instructs the model to READ the files before acting when
  *    relevant, without embedding their content.
  *  - Files are probed via `ctx.fs` (the host filesystem seam); a missing fs
  *    service or an unreadable probe degrades to no hint (never throws).
  *  - Pre-promotion requests get NO hint (matches the anchored bootstrap).
+ *  - Subagents skip the phase wait by default (their first request already
+ *    counts as promoted); `includeSubagents: true` makes a subagent's own
+ *    first reply or tool call open the hint — which also keeps the injection
+ *    out of the context gate's stripped first request (the gate strips
+ *    non-claimed messages while unpromoted).
  *
  * ROW ORDER: this plugin registers its `agent/pre-step` handler with
- * `prepend: true` and after `tool-bootstrap`, so it runs inside the
- * bootstrap's outermost strip — but it emits AFTER promotion, when the strip
- * is inactive. The hint source kind is `instruction-hint`, which is NOT in
- * `suppressedContextSources`, so it is never stripped.
+ * `prepend: true` and after `context-gate`/`tool-bootstrap`, so it runs
+ * inside the gate's outermost strip — but it emits AFTER promotion, when the
+ * strip is inactive. The hint source kind is `instruction-hint`, which is
+ * not in the gate's claimed-baseline allowlist, so the gate can strip it
+ * only while the session is unpromoted (never the intended path).
  */
 
 import { createEpochPromotion } from './compaction-epoch.mjs'
@@ -50,6 +61,18 @@ function parsePromoteOn(value) {
   if (value === undefined || value === 'either') return PROMOTE_EVENTS.either
   if (value === 'tool-call' || value === 'assistant-message') return PROMOTE_EVENTS[value]
   throw new TypeError(`${name}: promoteOn must be one of "tool-call", "assistant-message", "either"; got ${JSON.stringify(value)}`)
+}
+
+/** Every config key this plugin accepts — anything else is a typo. */
+const ALLOWED_KEYS = new Set(['promoteOn', 'includeSubagents'])
+
+/** Validate an optional boolean flag with a default. */
+function booleanOption(value, field, fallback) {
+  if (value === undefined) return fallback
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${name}: ${field} must be a boolean`)
+  }
+  return value
 }
 
 /** Find the project root: first ancestor containing any root marker (e.g. .git). */
@@ -103,12 +126,42 @@ function parentPath(path) {
 
 /** Register the post-promotion instruction-hint injector. */
 export function apply(ctx, config) {
-  const promoteEvents = parsePromoteOn(config.promoteOn)
-  const promotion = createEpochPromotion(promoteEvents)
+  const source = config === undefined ? {} : config
+  if (typeof source !== 'object' || source === null || Array.isArray(source)) {
+    throw new TypeError(`${name}: config must be an object`)
+  }
+  const unknown = Object.keys(source).filter((key) => !ALLOWED_KEYS.has(key))
+  if (unknown.length > 0) {
+    throw new TypeError(
+      `${name}: unknown config key(s) ${unknown.join(', ')} — allowed keys: ${[...ALLOWED_KEYS].sort().join(', ')}`,
+    )
+  }
+  const promoteEvents = parsePromoteOn(source.promoteOn)
+  const includeSubagents = booleanOption(source.includeSubagents, 'includeSubagents', false)
+  const promotion = createEpochPromotion(promoteEvents, { includeSubagents })
   ctx.on('session/event', (session, event) => promotion.observe(session, event))
 
-  /** Sessions that already received the hint. */
-  const hinted = new Set()
+  /**
+   * Sessions whose hint is already durable in the event log — the
+   * restart-safe replacement for an in-memory "already hinted" set. Seeded by
+   * a one-time scan, then maintained incrementally through `session/event`.
+   */
+  const hinted = new Map()
+  const hintIsDurable = (session) => {
+    const known = hinted.get(session.id)
+    if (known !== undefined) return known
+    const found = (Array.isArray(session.events) ? session.events : []).some((event) =>
+      event.type === 'user/message' && event.data?.source?.kind === 'instruction-hint',
+    )
+    hinted.set(session.id, found)
+    return found
+  }
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'user/message' && event.data?.source?.kind === 'instruction-hint') {
+      hinted.set(session.id, true)
+    }
+  })
+
   let warned = false
   const warnOnce = (message) => {
     if (warned) return
@@ -125,8 +178,8 @@ export function apply(ctx, config) {
     try {
       if (promotion.status(agent).promoted !== true) return decision
       const session = agent.session
-      if (session === undefined || hinted.has(session.id)) return decision
-      hinted.add(session.id)
+      if (session === undefined || hintIsDurable(session)) return decision
+      hinted.set(session.id, true)
 
       const fs = ctx.get('fs')
       if (fs === undefined) return decision

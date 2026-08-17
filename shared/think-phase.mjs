@@ -15,11 +15,18 @@
  * Mechanism, per user turn:
  *
  *  1. THINK (step 0): `system-prompt/assemble` strips the catalog to ZERO
- *     tools and `agent/pre-step` strips auto-injected context (same
- *     suppressed-source discipline as the anchored presets), so the first
+ *     tools and `agent/pre-step` strips auto-injected context (an enumerated
+ *     `suppressedContextSources` list), so the first
  *     request of the turn reproduces the zero-tool condition on the REAL user
  *     message — no synthetic anchor round, no deferred input. The model
  *     writes its full "We …" plan as an ordinary assistant reply.
+ *
+ *     SCOPE NOTE (2026-08-17): this strip is THINK-STEP-scoped (one step per
+ *     turn), not session-phase-scoped — the shared context-gate's promotion
+ *     phase machine does not map onto it, so the enumerated list stays here
+ *     deliberately. Session-phase injection control (preset/, zero-anchored,
+ *     whoami) belongs to context-gate; per-step strips are a documented
+ *     exception.
  *  2. STEER: a text-only reply would close the turn, so `agent/turn-stopping`
  *     (the serial pre-commit checkpoint) calls `agent.steer(...)` exactly
  *     once per turn with a plugin-sourced notice: "tools are now open —

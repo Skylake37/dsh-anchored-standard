@@ -104,19 +104,21 @@ export function apply(ctx) {
         // harness's own code mode (`registry.schemas(exec.agent)`).
         const schemas = ctx.tools.schemas(exec?.agent)
         const wanted = query.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean)
-        const matches = schemas
-          .filter((schema) => {
-            const haystack = `${schema.name} ${schema.description ?? ''}`.toLowerCase()
-            return wanted.every((token) => haystack.includes(token))
-          })
-          .slice(0, MAX_RESULTS)
-        if (matches.length === 0) {
+        const all = schemas.filter((schema) => {
+          const haystack = `${schema.name} ${schema.description ?? ''}`.toLowerCase()
+          return wanted.every((token) => haystack.includes(token))
+        })
+        const matches = all.slice(0, MAX_RESULTS)
+        if (all.length === 0) {
           lines.push(`No tools match "${query}".`)
         } else {
-          lines.push(`Matching tools (${matches.length}):`)
+          lines.push(`Matching tools (${matches.length}${all.length > MAX_RESULTS ? ` of ${all.length}` : ''}):`)
           for (const schema of matches) {
             const desc = (schema.description || '').split('\n')[0].slice(0, 90)
             lines.push(`- ${schema.name}: ${desc}`)
+          }
+          if (all.length > MAX_RESULTS) {
+            lines.push(`(truncated at ${MAX_RESULTS} — add tokens to narrow the query, e.g. "mcp browser" or "mcp tavily")`)
           }
           lines.push('Unlock with dev_tool_search({"toolNames": ["<exact name>"]}).')
         }

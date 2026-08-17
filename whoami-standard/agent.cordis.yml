@@ -23,6 +23,24 @@
 # pool instances — `provide()` throws on the second registration under the
 # same realm symbol; labels join REALMS, and are not what this file needs.)
 
+# ── context gate (must stay FIRST) ──────────────────────────────────────────
+
+# Unified injection control (shared/context-gate.mjs): while the session is
+# unpromoted, BOTH unified injection paths are closed — the assembly's
+# runtime-context contributions are blanked (the whole `SystemPrompt.context()`
+# family) and the pre-step waterfall keeps ONLY the claimed message batch plus
+# the `allowKinds` entries. Promotion here is the anchor reply
+# (`promoteOn: assistant-message`), matching the zero-tool-bootstrap row below.
+# This row replaces the bootstrap's former enumerated `suppressedContextSources`
+# strip: the gate is default-deny and also reaches the runtime-context family
+# the enum could not touch. `includeSubagents: true` gates subagents the same
+# way, in sync with the zero-tool-bootstrap and anchor-turn rows below.
+- id: context-gate
+  name: ./context-gate.mjs
+  config:
+    promoteOn: assistant-message
+    includeSubagents: true
+
 # ── identity ────────────────────────────────────────────────────────────────
 
 # Keep this text byte-identical to the Minimal preset. `complete` prevents the
@@ -65,10 +83,10 @@
 # (`includeSubagents: true`); after the anchor reply they see the resident
 # catalog.
 #
-# The same phase gate suppresses AUTO-INJECTED context (`suppressedContextSources`,
-# default `['skill-catalog', 'agent-instructions']`) while the session is
-# un-promoted — same reasoning as the anchored variant (issue #6: 0/9 anchored
-# with the skill catalog present vs ~81% without).
+# AUTO-INJECTED context while unpromoted is handled by the context-gate row
+# above (default-deny, both unified injection paths) — same reasoning as the
+# anchored variant (issue #6: 0/9 anchored with the skill catalog present vs
+# ~81% without).
 #
 # COMPACTION (local addition): after `compaction/end` the session falls back
 # to the controlled phase — shells + `compactionTools` — until a NEW durable
@@ -78,7 +96,6 @@
 - id: zero-tool-bootstrap
   name: ./zero-tool-bootstrap.mjs
   config:
-    suppressedContextSources: [agent-instructions, skill-catalog]
     compactionTools: [read, write, edit, glob, grep, todo_write, ask_user_question]
     includeSubagents: true
 
@@ -116,14 +133,13 @@
 # Windows-only `bash` tool (see custom-bash.mjs): the official bash
 # needs a PTY, and DSH's PTY backend is linux/darwin-only. This row presents
 # the SAME tool name (`bash`) with a Minimal-compatible description but spawns
-# Git Bash through the ordinary cross-platform subprocess seam. `bashPath`
-# defaults to `bash` on PATH; point it at Git Bash explicitly when the WSL
-# shim would otherwise be picked up.
+# Git Bash through the ordinary cross-platform subprocess seam. The shell is
+# resolved WITHOUT a hardcoded install path (issue #24): unset `bashPath`
+# probes the git install root, then the well-known Git-for-Windows roots,
+# then plain `bash` on PATH; set it only to pin a shell probing cannot find.
 - id: custom-bash
   name: ./custom-bash.mjs
   disabled: !!js process.platform !== 'win32'
-  config:
-    bashPath: 'C:\Program Files\Git\bin\bash.exe'
 
 # ── filesystem ──────────────────────────────────────────────────────────────
 

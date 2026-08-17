@@ -17,6 +17,13 @@
  *     The frozen loop-built request is untouched (the log-reconstructability
  *     invariant holds); only the route differs. Auto-injected context is
  *     still stripped during think steps (lever 3).
+ *
+ *     SCOPE NOTE (2026-08-17): like think-phase.mjs, this context strip is
+ *     THINK-STEP-scoped, not session-phase-scoped — the shared context-gate's
+ *     promotion phase machine does not map onto it, so the enumerated
+ *     `suppressedContextSources` list stays here deliberately. Session-phase
+ *     injection control (preset/, zero-anchored, whoami) belongs to
+ *     context-gate; per-step strips are a documented exception.
  *  2. STEER: `agent/turn-stopping` steers exactly once per turn (same
  *     resume-safe machinery as think-phase.mjs).
  *  3. EXECUTE (step 1+): every other request runs on the ORIGINAL provider
