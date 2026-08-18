@@ -76,6 +76,12 @@ test('exports a diagnostic plugin name and declares the tools inject', () => {
   assert.deepEqual(inject, ['tools'])
 })
 
+test('promotion and toolBootstrap configuration is rejected at the eternal boundary', () => {
+  assert.throws(() => register({ promotion: { enabled: true } }), /never promotes/)
+  assert.throws(() => register({ toolBootstrap: { firstTurnTools: 'empty' } }), /no toolBootstrap/)
+  assert.throws(() => register({ unrelated: true }), /unsupported config key/)
+})
+
 test('the visible catalog is exactly the Minimal pair on every request', async () => {
   const { listeners } = register()
   // No promotion concept: the same filter applies to any assembly.

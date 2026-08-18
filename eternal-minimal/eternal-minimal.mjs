@@ -58,6 +58,8 @@
  *    so a bug can never brick every request of a session.
  */
 
+import { randomUUID } from 'node:crypto'
+
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'eternal-minimal'
 
@@ -107,6 +109,35 @@ function sourceList(value, field, fallback) {
   return new Set(value)
 }
 
+/**
+ * Eternal Minimal owns a permanent phase, not a bootstrap phase. Keep its
+ * public configuration deliberately narrow so a host cannot accidentally
+ * reintroduce promotion or expose a second tool surface.
+ */
+function validateConfig(config) {
+  if (config === undefined) return
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    throw new TypeError(`${name}: config must be an object`)
+  }
+  const allowed = new Set(['suppressedContextSources', 'guide', 'gateway', 'gatewayCommand', 'maxGatewayChars'])
+  const unknown = Object.keys(config).filter((key) => !allowed.has(key))
+  if (unknown.length > 0) {
+    const incompatible = unknown.filter((key) => /promot|bootstrap|phase/i.test(key))
+    if (incompatible.length > 0) {
+      throw new TypeError(`${name}: ${incompatible.join(', ')} is incompatible — eternal-minimal never promotes and has no toolBootstrap`)
+    }
+    throw new TypeError(`${name}: unsupported config key(s): ${unknown.join(', ')}`)
+  }
+  if (config.guide !== undefined && typeof config.guide !== 'boolean') throw new TypeError(`${name}: guide must be boolean`)
+  if (config.gateway !== undefined && typeof config.gateway !== 'boolean') throw new TypeError(`${name}: gateway must be boolean`)
+  if (config.gatewayCommand !== undefined && (typeof config.gatewayCommand !== 'string' || config.gatewayCommand.length === 0)) {
+    throw new TypeError(`${name}: gatewayCommand must be a non-empty string`)
+  }
+  if (config.maxGatewayChars !== undefined && (!Number.isSafeInteger(config.maxGatewayChars) || config.maxGatewayChars <= 0)) {
+    throw new TypeError(`${name}: maxGatewayChars must be a positive integer`)
+  }
+}
+
 /** Extract the joined text of a tool result's rendered content blocks. */
 function renderResultText(result) {
   const blocks = Array.isArray(result?.content) ? result.content : []
@@ -130,6 +161,7 @@ function cap(text, maxChars) {
 
 /** Register the eternal two-tool filter and the dshx bash gateway. */
 export function apply(ctx, config) {
+  validateConfig(config)
   const suppressedSources = sourceList(config?.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES)
   const guide = config?.guide !== false
   const gateway = config?.gateway !== false

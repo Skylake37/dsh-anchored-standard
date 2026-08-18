@@ -589,6 +589,8 @@ The gateway refuses to dispatch the shells/`str_replace_editor` themselves
 tools, malformed JSON, and tool failures all come back as readable payloads.
 Set `gateway: false` for a bare two-tool session with no interception.
 
+**Patch boundary:** Eternal Minimal is permanently phase-less. Its hook accepts only `suppressedContextSources`, `guide`, `gateway`, `gatewayCommand`, and `maxGatewayChars`; `promotion`, `sessionPhase`, and `toolBootstrap` settings are rejected loudly rather than ignored. Gateway calls retain the registry's policy/approval path because dispatch always enters through `ctx.tools.execute()`.
+
 Install as a separate preset id:
 
 ```sh
