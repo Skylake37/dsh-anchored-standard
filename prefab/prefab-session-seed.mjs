@@ -233,7 +233,7 @@ export function loadPrefabTemplate(path = DEFAULT_TEMPLATE) {
   const failedCallIds = failedInstructionReadIds(rows)
   const retained = []
   let instructionResultSeq
-  let pendingInstructionRead = false
+  const pendingInstructionReads = new Set()
   for (const event of rows.slice(1)) {
     // Packed rows contain only assistant/chunk events, which are intentionally
     // absent from the compact replay.
@@ -248,16 +248,19 @@ export function loadPrefabTemplate(path = DEFAULT_TEMPLATE) {
     }
     const cleaned = cleanAssistantMessage(event, failedCallIds)
     retained.push(cleaned)
-    if (cleaned.type === 'tool/call') pendingInstructionRead = toolCallReadsInstructionFile(cleaned)
+    if (cleaned.type === 'tool/call' && toolCallReadsInstructionFile(cleaned)) {
+      if (typeof cleaned.data?.callId === 'string') pendingInstructionReads.add(cleaned.data.callId)
+    }
     if (cleaned.type === 'tool/result') {
-      if (pendingInstructionRead && instructionResultSeq === undefined) {
+      const callId = toolResultCallId(cleaned)
+      if (typeof callId === 'string' && pendingInstructionReads.delete(callId)
+        && instructionResultSeq === undefined) {
         const hasSuccessfulText = textParts(event).some((part) =>
           typeof part.text === 'string'
           && part.text.trim().length > 0
           && !/^\s*(?:error|toolerror)\s*:/i.test(part.text))
         if (hasSuccessfulText) instructionResultSeq = event.seq
       }
-      pendingInstructionRead = false
     }
   }
 

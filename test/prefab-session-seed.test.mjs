@@ -146,8 +146,8 @@ test('failed instruction reads are removed by call ID even when results interlea
         { type: 'tool-call', id: 'call-agents', name: 'read', arguments: JSON.stringify({ path: 'C:\\source\\AGENTS.md' }) },
       ] } }, surfaceOp: 'append' },
       { type: 'tool/call', seq: 3, data: { callId: 'call-agents', name: 'read', arguments: JSON.stringify({ path: 'C:\\source\\AGENTS.md' }) } },
-      { type: 'tool/call', seq: 4, data: { callId: 'call-other', name: 'read', arguments: JSON.stringify({ path: 'C:\\source\\README.md' }) } },
-      { type: 'tool/result', seq: 5, data: { message: { source: { callId: 'call-other' }, content: [{ type: 'tool-result', toolCallId: 'call-other', content: [{ type: 'text', text: '# README' }], isError: false }] } }, surfaceOp: 'append' },
+      { type: 'tool/call', seq: 4, data: { callId: 'call-other', name: 'read', arguments: JSON.stringify({ path: 'C:\\source\\CLAUDE.md' }) } },
+      { type: 'tool/result', seq: 5, data: { message: { source: { callId: 'call-other' }, content: [{ type: 'tool-result', toolCallId: 'call-other', content: [{ type: 'text', text: '# other rules' }], isError: false }] } }, surfaceOp: 'append' },
       { type: 'tool/result', seq: 6, data: { message: { source: { callId: 'call-agents' }, content: [{ type: 'tool-result', toolCallId: 'call-agents', content: [{ type: 'text', text: 'Error: unavailable' }], isError: true }] } }, surfaceOp: 'append' },
       { type: 'step/end', seq: 7, data: { turn: 1, step: 1 } },
       { type: 'turn/end', seq: 8, data: { turn: 1, reason: { kind: 'completed' } } },
@@ -157,7 +157,8 @@ test('failed instruction reads are removed by call ID even when results interlea
     const plan = buildSeedPlan(loadPrefabTemplate(templatePath), 'D:\\workspace', '# rules')
     const serialized = JSON.stringify(plan)
     assert.doesNotMatch(serialized, /call-agents|Tool errors:|Error: unavailable/)
-    assert.match(serialized, /call-other|# README/)
+    assert.match(serialized, /call-other|# rules/)
+    assert.doesNotMatch(serialized, /# other rules/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
