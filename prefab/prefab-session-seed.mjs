@@ -114,14 +114,16 @@ function toolResultCallId(event) {
 
 function failedInstructionReadIds(rows) {
   const calls = new Map(rows
-    .filter((event) => event.type === 'tool/call')
-    .map((event) => [event.data?.callId, event]))
+    .filter((event) => event.type === 'tool/call' && typeof event.data?.callId === 'string')
+    .map((event) => [event.data.callId, event]))
   const failed = new Set()
   for (const event of rows) {
     if (event.type !== 'tool/result') continue
     const callId = toolResultCallId(event)
     const call = calls.get(callId)
-    if (call === undefined || !toolCallReadsInstructionFile(call)) continue
+    // Results can be interleaved; pair them by callId rather than assuming the
+    // preceding tool call was the instruction read.
+    if (typeof callId !== 'string' || call === undefined || !toolCallReadsInstructionFile(call)) continue
     const block = event.data?.message?.content?.find((item) => item?.type === 'tool-result')
     const hasError = block?.isError === true || (Array.isArray(block?.content)
       && block.content.some((part) => typeof part?.text === 'string' && /^\s*Error:/i.test(part.text)))

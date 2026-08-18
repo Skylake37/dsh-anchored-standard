@@ -90,7 +90,7 @@ to that legacy path; `instantiate.mjs --dry-run` remains available for review.
   `$DSH_HOME/AGENTS.md`, then the target workspace-root `AGENTS.md`. Equal
   content is injected once; no README, directory, or source scan is performed.
   If neither file exists, a neutral no-additional-rules result is used.
-- Failed warm-up instruction-file calls are omitted from the hydrated history.
+- Failed warm-up instruction-file calls are omitted from the hydrated history; failures are paired by tool call ID even when tool results are interleaved.
 - The prefab's durable `dev_tool_search` call unlocks `read`, `write`, `edit`,
   `glob`, `grep`, `ask_user_question`, `todo_write`, and `web_search` for the
   real task turn. The bootstrap `bash` and `str_replace_editor` tools plus the
