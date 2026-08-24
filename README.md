@@ -454,6 +454,18 @@ npm test
   installation.
 - The plugin performs no network requests and adds no telemetry.
 
+### Troubleshooting: a duplicate `instruction-hint` after a host restart
+
+`instruction-hint` injects its hint at most once per session via a durable scan of
+`session.events`. The scan is preventive, not guaranteed: if the first `agent/pre-step`
+after a host restart runs before the session log is materialized, the scan sees an empty
+event list and re-injects the hint. Older versions also used a deterministic id
+(`instruction-hint-<sessionId>`), so a re-injected duplicate collided with the original
+message and stopped history assembly. Since the unique-id change, a re-injection degrades
+to a few wasted context tokens instead. If an old log was broken by the deterministic-id
+collision, repairing it should dedup on `source.kind === 'instruction-hint'`, which still
+identifies the old rows (they share one id; new rows no longer do).
+
 ## Zero-Anchored Standard (experimental)
 
 An extra test mode that does not change the Anchored Standard logic above. It

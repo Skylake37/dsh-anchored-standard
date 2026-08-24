@@ -376,6 +376,10 @@ npm test
 - preset 与 shell 访问具有相同信任等级，安装前应自行审阅文件；
 - 插件不会发起网络请求，也不增加遥测。
 
+### 排障：主机重启后重复注入的 `instruction-hint`
+
+`instruction-hint` 通过扫描 `session.events` 的持久事件，将提示控制在每个会话至多注入一条。该扫描是预防而非保证：若主机重启后的首个 `agent/pre-step` 在会话日志物化之前运行，扫描会看到空事件列表而再次注入。旧版本还使用确定性 id（`instruction-hint-<sessionId>`），重复注入与原始消息冲突会导致历史停止组装；改为唯一 id 后，重复注入只会浪费少量上下文 token。旧日志若曾因该冲突断裂，修复时应按 `source.kind === 'instruction-hint'` 去重（旧行共享同一 id；新行不再共享）。
+
 ## Zero-Anchored Standard（实验）
 
 这是不改变上面 Anchored Standard 逻辑的额外测试模式。它沿用同一套 Minimal
