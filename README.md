@@ -26,12 +26,22 @@ suite) remain valid and are largely model-agnostic. A personal note from the mai
 [FAREWELL.md](./FAREWELL.md) (Chinese). Contributors and collaborators are
 listed in [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md).
 
-Community projects that users report perform better in some scenarios:
+Community projects that users report perform better in some scenarios, plus
+ecosystem tooling built around these presets:
 
 - [dsh-routing-suite](https://github.com/yjh051108/dsh-routing-suite) — a runtime injector
   plus task-aware thinking-mode routing presets (the router-standard family).
 - [J-Space Cognition Suite](https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6)
   — a model-agnostic inference-time cognitive control layer packaged as a Skill.
+- [both-anchored (auto-b7n)](https://github.com/0liveiraaa/DeepseekCotexplorations/tree/main/contributions/andyzheng0715-v4pro-anchored-both/) —
+  an independently developed two-phase anchored preset: no first-request output
+  cap, no promotion gate, promotion on the first durable `tool/call` or
+  `assistant/message`, with the full PTC SDK kept intact via post-promotion wire
+  trimming (the #85 feedback and experiment data live in the research repository,
+  with sample sizes and boundary caveats stated in the original contribution).
+- [dsh-recovery](https://github.com/AndyZHENG0715/dsh-recovery) — a zero-dependency
+  self-healing CLI plus watchdog plugin: broken-preset quarantine/rollback,
+  safe-mode whitelists, and boot probes.
 
 ## Modes at a glance
 
@@ -326,6 +336,15 @@ Developed and tested against:
 - DeepSeek Harness `0.1.0-rc.5`
 - repository commit [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a)
 - Node.js 24 on Windows
+
+DeepSeek Harness `0.1.3-alpha.1` removed the public `session.events` array in
+favor of `session.snapshotEvents()` (a frozen copy whose cache is invalidated on
+every append). Since PR
+[#88](https://github.com/xiaobright/dsh-anchored-standard/pull/88) every
+history scan prefers `snapshotEvents()` and falls back to `session.events`, so
+the presets load on both old and new harness builds. Verified against the
+`0.1.3-alpha.1` source (the session API surface the plugins touch, plus the
+plugin hook names) and by the mock suite; not by live runs on that build.
 
 The persistent shell resolves `shellPath` adaptively: it keeps the
 terminal-bash plugin default `/bin/bash` on hosts where that absolute path

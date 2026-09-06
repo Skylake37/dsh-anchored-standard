@@ -20,12 +20,18 @@ harness 兼容性跟进）。机制结论、剂量实验数据与工具链（con
 [FAREWELL.md](./FAREWELL.md)；参与项目协作、代码、研究与复现的社区成员见
 [致谢名单](./ACKNOWLEDGEMENTS.md)。
 
-社区中反馈在部分场景效果更好的项目：
+社区中反馈在部分场景效果更好的项目，以及围绕这些 preset 的生态工具：
 
 - [dsh-routing-suite](https://github.com/yjh051108/dsh-routing-suite)——运行时注入器
   + 任务感知的思维模式路由 preset（router-standard 家族）。
 - [J-Space Cognition Suite](https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6)——
   模型不可知的推理时认知控制层，以 Skill 形式封装。
+- [both-anchored (auto-b7n)](https://github.com/0liveiraaa/DeepseekCotexplorations/tree/main/contributions/andyzheng0715-v4pro-anchored-both/)——
+  社区独立发展的两阶段锚定 preset：无首轮输出帽、无晋升门，首个持久 `tool/call` 或
+  `assistant/message` 即晋升，晋升后以 wire 裁剪保持完整 PTC SDK（#85 反馈与实验数据随
+  研究仓库收录，样本量与边界声明见原贡献）。
+- [dsh-recovery](https://github.com/AndyZHENG0715/dsh-recovery)——零依赖的自愈 CLI +
+  watchdog 插件：坏预设隔离/回滚、安全模式白名单与启动探测。
 
 ## 模式总览
 
@@ -276,6 +282,13 @@ prefab/                  Prefab Anchored Standard + 内置会话模板
 - DeepSeek Harness `0.1.0-rc.5`
 - 仓库提交 [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a)
 - Windows / Node.js 24
+
+DeepSeek Harness `0.1.3-alpha.1` 移除了公开的 `session.events` 数组，改为
+`session.snapshotEvents()`（冻结副本，缓存随每次 append 失效）。自 PR
+[#88](https://github.com/xiaobright/dsh-anchored-standard/pull/88) 起，所有
+历史扫描优先使用 `snapshotEvents()`，并在旧版上回退到 `session.events`，因此
+preset 在新旧 harness 上都能加载。验证方式为对照 `0.1.3-alpha.1` 源码（插件
+触及的 session API 面 + 插件钩子名）与 mock 测试套件，未在该构建上实机运行。
 
 持久 shell 的 `shellPath` 按环境自适应：`/bin/bash` 存在的传统主机保持
 terminal-bash 插件的默认行为不变；仅当该绝对路径不存在（如 NixOS，bash
