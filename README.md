@@ -346,6 +346,17 @@ the presets load on both old and new harness builds. Verified against the
 `0.1.3-alpha.1` source (the session API surface the plugins touch, plus the
 plugin hook names) and by the mock suite; not by live runs on that build.
 
+DeepSeek Harness `0.1.3-alpha.2` replaced the `dsh-persona` row's `text` key
+with a required `prefix` (plus an optional `suffix`), so every mode's preset
+failed to mount with `invalid config: $.prefix missing required value`. Since PR
+[#90](https://github.com/xiaobright/dsh-anchored-standard/pull/90) the persona
+rows use `prefix:` — the persona TEXT is unchanged (it still matches the
+official 0.1.3 `minimal` persona row byte-for-byte), so the byte-pure Minimal
+anchor condition is unaffected. **This part is a one-way migration:** a preset
+row cannot carry both keys (unknown keys fail at mount), so on dsh
+`0.1.3-alpha.1` and older the persona row must use `text:` again — change that
+one line per mode directory, or use the commit before #90.
+
 The persistent shell resolves `shellPath` adaptively: it keeps the
 terminal-bash plugin default `/bin/bash` on hosts where that absolute path
 exists, and falls back to `bash` (PATH lookup) otherwise — e.g. NixOS, where

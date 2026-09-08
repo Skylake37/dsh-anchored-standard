@@ -290,6 +290,15 @@ DeepSeek Harness `0.1.3-alpha.1` 移除了公开的 `session.events` 数组，�
 preset 在新旧 harness 上都能加载。验证方式为对照 `0.1.3-alpha.1` 源码（插件
 触及的 session API 面 + 插件钩子名）与 mock 测试套件，未在该构建上实机运行。
 
+DeepSeek Harness `0.1.3-alpha.2` 把 `dsh-persona` 行的 `text` 键换成了必填的
+`prefix`（另有可选 `suffix`），于是每个模式的 preset 都挂载失败，报
+`invalid config: $.prefix missing required value`。自 PR
+[#90](https://github.com/xiaobright/dsh-anchored-standard/pull/90) 起，persona
+行改用 `prefix:`——persona 文本本身未动（仍与官方 0.1.3 `minimal` 的 persona
+行逐字节一致），字节纯净的 Minimal 锚定条件不受影响。**这一段是单向迁移**：
+同一行不能同时写两个键（未知键会在挂载时报错），因此在 dsh `0.1.3-alpha.1`
+及更早版本上必须把 `text:` 改回来——每个模式目录改一行，或使用 #90 之前的提交。
+
 持久 shell 的 `shellPath` 按环境自适应：`/bin/bash` 存在的传统主机保持
 terminal-bash 插件的默认行为不变；仅当该绝对路径不存在（如 NixOS，bash
 位于 Nix store 中）时才回退为 `bash`（PATH 查找）。自带 `/bin/bash` 的主机
