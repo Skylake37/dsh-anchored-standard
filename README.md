@@ -12,19 +12,41 @@ on demand.
 This is a community project. It is not an official DeepSeek preset and is not
 affiliated with or endorsed by DeepSeek.
 
-Feel free to submit feedback on the plugin in the form of Issues or PRs. For ideas for new plugins or useful findings, please submit them under the [repository](https://github.com/0liveiraaa/DeepseekCotexplorations).
+The project is frozen — new issues and pull requests are no longer accepted (see
+[Project status](#project-status-frozen-2026-09-10)). For ideas for new plugins or useful
+findings, please submit them under the
+[repository](https://github.com/0liveiraaa/DeepseekCotexplorations).
 
-## Project status (2026-08-17)
+## Project status (frozen 2026-09-10)
 
-Following the price increases on both the DeepSeek official API and the opencode go
-subscription, active development of this project has effectively stopped: the evaluation
-loops these presets depend on (Project2-class runs and multi-trial roll/probe experiments)
-are no longer affordable. The repository stays available as-is and receives **maintenance
-only** (bug fixes and harness-compatibility updates when feasible). The mechanism findings,
-the dose-response data, and the tooling (context-gate, the prefab pipeline, the probe
-suite) remain valid and are largely model-agnostic. A personal note from the maintainer:
-[FAREWELL.md](./FAREWELL.md) (Chinese). Contributors and collaborators are
-listed in [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md).
+**This project is frozen.** On 2026-09-10 DeepSeek released V4.1 Flash and announced that
+V4 Pro — the model these presets were measured on and tuned for — is retired on
+2026-09-14 12:00, with its traffic routed to V4.1 Flash. The presets exist to re-anchor a
+trajectory that the successor does not appear to need patched: the flash family anchored
+under every condition in our first-round dose-response probes (32/32), which is why the
+project never tuned for it. V4.1 Flash's own first-round trajectory has NOT been measured
+(no API budget in maintenance mode), so treat that as an inference from the earlier
+flash data, not a result. The model the work was built around is going away, so the
+maintenance period ends here. **New issues and pull requests are no longer accepted or
+handled.** The repository stays online with its history, data and acknowledgement record
+intact.
+
+This is the ending [`FAREWELL.md`](./FAREWELL.md) asked for: "let the next model eat more
+diverse harness environments during training, so that patch engineering like this is no
+longer necessary." That file now ends with a closing note written by the successor model
+itself, V4.1 Flash. What stays valid is the model-agnostic part — the `context-gate`
+unified injection control, the prefab pipeline, the discovery-tool dose-response data, and
+the general observation that the API-visible surface conditions the trajectory. Research
+material remains open in
+[DeepseekCotexplorations](https://github.com/0liveiraaa/DeepseekCotexplorations).
+
+Earlier status (2026-08-17, kept for the record): following the price increases on both the
+DeepSeek official API and the opencode go subscription, active development had already
+stopped — the evaluation loops these presets depend on (Project2-class runs and multi-trial
+roll/probe experiments) were no longer affordable, leaving the repository in **maintenance
+only** mode (bug fixes and harness-compatibility updates when feasible). A personal note
+from the maintainer: [FAREWELL.md](./FAREWELL.md) (Chinese). Contributors and collaborators
+are listed in [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md).
 
 Community projects that users report perform better in some scenarios, plus
 ecosystem tooling built around these presets:
