@@ -219,7 +219,12 @@ export function apply(ctx, config) {
 
       const userGlobalFiles = []
       try {
-        const dshHome = process.env.DSH_HOME ?? (process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.dsh` : undefined)
+        // POSIX has no USERPROFILE — fall back to $HOME/.dsh, the
+        // conventional location the header documents ($DSH_HOME/AGENTS.md
+        // resolves to ~/.dsh/AGENTS.md there when DSH_HOME is unset).
+        const dshHome = process.env.DSH_HOME
+          ?? (process.env.USERPROFILE ? `${process.env.USERPROFILE}\\.dsh` : undefined)
+          ?? (process.env.HOME ? `${process.env.HOME}/.dsh` : undefined)
         if (dshHome !== undefined) {
           userGlobalFiles.push(...await presentInDir(fs, dshHome, [USER_GLOBAL_CANDIDATE], signal))
         }
